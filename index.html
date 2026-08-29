@@ -1125,7 +1125,7 @@
       <div style="display:flex;gap:8px;">
         <button class="pay-btn" style="background:var(--bg);color:var(--text);border:1.5px solid var(--border);flex:1;font-size:12px" onclick="printReceipt()">🖨 สลิป</button>
         <button class="pay-btn" style="background:#1565c0;color:#fff;flex:1;font-size:12px" onclick="printReceiptA4()">📄 A4</button>
-        <button class="pay-btn pay-cash" style="flex:2;" onclick="closeModal('successModal');newOrder()">🛒 ออเดอร์ใหม่</button>
+        <button class="pay-btn pay-cash" id="successNewOrderBtn" style="flex:2;" onclick="closeModal('successModal');newOrder()">🛒 ออเดอร์ใหม่ <span style="font-size:11px;opacity:0.85">(Enter)</span></button>
       </div>
     </div>
   </div>
@@ -9324,6 +9324,801 @@ function refreshDisplayModeSection(){
 })();
 
 
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 8: แก้ Enter=ออเดอร์ใหม่, VAT ปิดอัตโนมัติ, กล้อง, sync
+// ============================================================
+
+// ==================== ข้อ 1: กด Enter ในหน้าชำระเงินสำเร็จ = ออเดอร์ใหม่ ====================
+document.addEventListener('keydown', function(e){
+  var successModal = document.getElementById('successModal');
+  if(successModal && successModal.classList.contains('show')){
+    if(e.key==='Enter'){
+      e.preventDefault();
+      e.stopPropagation();
+      closeModal('successModal');
+      newOrder();
+    }
+  }
+}, true); // capture phase เพื่อชิงก่อน handler อื่น
+
+// ==================== ข้อ 2: VAT 7% ปิดไว้อัตโนมัติ ====================
+var SK_VAT_PREF = 'pos_vat_pref_v1';
+
+// โหลดค่า preference VAT (ถ้าไม่เคยตั้ง = ปิด)
+function loadVatPref(){
+  try { var s=localStorage.getItem(SK_VAT_PREF); if(s!==null) return s==='1'; } catch(e){}
+  return false; // ค่าเริ่มต้น = ปิด VAT
+}
+function saveVatPref(on){ localStorage.setItem(SK_VAT_PREF, on?'1':'0'); }
+
+// ตั้งค่า vatToggle ตอนโหลด + จำค่าที่ผู้ใช้เลือก
+(function initVatPref(){
+  function run(){
+    var vt = document.getElementById('vatToggle');
+    if(!vt) return;
+    vt.checked = loadVatPref();
+    // จำค่าเมื่อผู้ใช้เปลี่ยน
+    vt.addEventListener('change', function(){ saveVatPref(vt.checked); });
+    if(typeof calcTotal==='function') calcTotal();
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 300); // เผื่อ init ช้า
+})();
+
+// เมื่อ newOrder ให้คง VAT ตาม preference (ไม่รีเซ็ตเป็นเปิด)
+(function hookNewOrderVat(){
+  var _orig = window.newOrder;
+  window.newOrder = function(){
+    _orig();
+    var vt = document.getElementById('vatToggle');
+    if(vt){ vt.checked = loadVatPref(); if(typeof calcTotal==='function') calcTotal(); }
+  };
+})();
+
+// ==================== ข้อ 3: แก้กล้อง (z-index + ขอสิทธิ์ดีขึ้น) ====================
+// 3.1 ยก z-index ของ camScanModal ให้สูงกว่า modal อื่น เมื่อเปิด
+(function fixCamModalZindex(){
+  function run(){
+    var cam = document.getElementById('camScanModal');
+    if(cam){ cam.style.zIndex = '9999'; }
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+})();
+
+// 3.2 override openCamScanFor ให้ยก z-index + ปรับปรุงการขอกล้อง
+var _origOpenCamScanFor = window.openCamScanFor;
+window.openCamScanFor = function(target){
+  camScanTarget = target || 'sell';
+  var cam = document.getElementById('camScanModal');
+  if(cam) cam.style.zIndex = '9999'; // อยู่หน้าสุดเสมอ
+  openModal('camScanModal');
+  startCamScanImproved();
+};
+
+// 3.3 ฟังก์ชันเปิดกล้องที่ปรับปรุงแล้ว — ขอสิทธิ์แบบ fallback หลายชั้น
+async function startCamScanImproved(){
+  var statusEl = document.getElementById('camScanStatus');
+  var modeEl = document.getElementById('camScanMode');
+  var resultEl = document.getElementById('camScanResult');
+  if(resultEl) resultEl.style.display = 'none';
+  if(statusEl) statusEl.textContent = 'กำลังขอสิทธิ์เข้าถึงกล้อง...';
+
+  // ตรวจว่าเบราว์เซอร์รองรับ getUserMedia ไหม
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    if(statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">❌ เบราว์เซอร์นี้ไม่รองรับกล้อง</span><br><span style="font-size:11px">ลองใช้ Chrome หรือ Safari เวอร์ชันล่าสุด และต้องเปิดผ่าน https://</span>';
+    return;
+  }
+
+  // ตรวจว่าเปิดผ่าน HTTPS ไหม (กล้องต้องใช้ HTTPS ยกเว้น localhost)
+  var isSecure = (location.protocol==='https:' || location.hostname==='localhost' || location.hostname==='127.0.0.1');
+  if(!isSecure){
+    if(statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">❌ ต้องเปิดผ่าน https:// เท่านั้น</span><br><span style="font-size:11px">กล้องใช้ได้เฉพาะเว็บที่เป็น https (ตอนนี้เปิดผ่าน '+location.protocol+')</span>';
+    return;
+  }
+
+  camScanning = false;
+  if(camStream){ try{ camStream.getTracks().forEach(function(t){t.stop();}); }catch(e){} camStream=null; }
+
+  // ลองขอกล้องหลัง (environment) ก่อน ถ้าไม่ได้ค่อยขอกล้องใดก็ได้
+  var constraintsList = [
+    { video: { facingMode: { ideal: 'environment' } }, audio: false },
+    { video: { facingMode: 'environment' }, audio: false },
+    { video: true, audio: false }
+  ];
+
+  var stream = null, lastErr = null;
+  for(var i=0;i<constraintsList.length;i++){
+    try {
+      stream = await navigator.mediaDevices.getUserMedia(constraintsList[i]);
+      if(stream) break;
+    } catch(err){ lastErr = err; }
+  }
+
+  if(!stream){
+    var msg = 'เปิดกล้องไม่ได้';
+    if(lastErr){
+      if(lastErr.name==='NotAllowedError' || lastErr.name==='PermissionDeniedError')
+        msg = 'ไม่ได้รับอนุญาตให้ใช้กล้อง — กรุณากด "อนุญาต" (Allow) เมื่อเบราว์เซอร์ถาม';
+      else if(lastErr.name==='NotFoundError' || lastErr.name==='DevicesNotFoundError')
+        msg = 'ไม่พบกล้องในอุปกรณ์นี้';
+      else if(lastErr.name==='NotReadableError' || lastErr.name==='TrackStartError')
+        msg = 'กล้องถูกใช้งานโดยแอปอื่นอยู่ — ปิดแอปที่ใช้กล้อง (เช่น กล้องถ่ายรูป, LINE) แล้วลองใหม่';
+      else if(lastErr.name==='OverconstrainedError')
+        msg = 'กล้องไม่รองรับการตั้งค่านี้';
+      else msg = 'เปิดกล้องไม่ได้: '+(lastErr.message||lastErr.name);
+    }
+    if(statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">❌ '+msg+'</span>'
+      + '<br><button onclick="startCamScanImproved()" style="margin-top:8px;padding:6px 16px;background:var(--primary);color:#fff;border:none;border-radius:8px;cursor:pointer;font-family:Sarabun,sans-serif;font-size:12px">🔄 ลองอีกครั้ง</button>'
+      + ' <button onclick="manualCamEntry()" style="margin-top:8px;padding:6px 16px;background:var(--bg);color:var(--text);border:1.5px solid var(--border);border-radius:8px;cursor:pointer;font-family:Sarabun,sans-serif;font-size:12px">⌨️ กรอกเอง</button>';
+    if(modeEl) modeEl.textContent = '';
+    return;
+  }
+
+  camStream = stream;
+  var video = document.getElementById('scannerVideo');
+  video.srcObject = camStream;
+  video.setAttribute('playsinline','true'); // สำคัญมากสำหรับ iOS
+  video.setAttribute('muted','true');
+  try { await video.play(); } catch(e){}
+
+  camScanning = true;
+  if(statusEl) statusEl.textContent = '📷 เล็งบาร์โค้ดเข้ากรอบ';
+
+  // เก็บ list กล้องไว้สลับ
+  try {
+    var devices = await navigator.mediaDevices.enumerateDevices();
+    camDevices = devices.filter(function(d){ return d.kind==='videoinput'; });
+  } catch(e){ camDevices = []; }
+
+  // เริ่ม detect
+  if('BarcodeDetector' in window){
+    if(modeEl) modeEl.textContent = 'โหมด: BarcodeDetector';
+    try {
+      camDetector = new BarcodeDetector({ formats: ['ean_13','ean_8','code_128','code_39','upc_a','upc_e','codabar','itf'] });
+      scanLoopNative();
+    } catch(e){
+      // ถ้าสร้าง detector ไม่ได้ ใช้ ZXing
+      await loadZxingAndScan();
+    }
+  } else {
+    if(modeEl) modeEl.textContent = 'โหมด: ZXing (กำลังโหลด...)';
+    await loadZxingAndScan();
+  }
+}
+
+async function loadZxingAndScan(){
+  var modeEl = document.getElementById('camScanMode');
+  try {
+    await loadZxing();
+    if(window.ZXing){
+      if(modeEl) modeEl.textContent = 'โหมด: ZXing';
+      scanLoopZxing();
+    } else {
+      if(modeEl) modeEl.textContent = 'โหลดตัวอ่านบาร์โค้ดไม่ได้ (ต้องต่อเน็ต) — ใช้ "กรอกเอง"';
+    }
+  } catch(e){
+    if(modeEl) modeEl.textContent = 'โหลดตัวอ่านบาร์โค้ดไม่ได้ (ต้องต่อเน็ต) — ใช้ "กรอกเอง"';
+  }
+}
+
+// 3.4 override quickadd ให้เปิดกล้องซ้อนถูกต้อง (ไม่ให้ quickAddModal บัง)
+// เมื่อสแกนจาก quickadd สำเร็จ ให้ปิดกล้องแล้วกลับไป quickAdd โดยไม่เปิดซ้ำ
+
+// ==================== ข้อ 4: sync สินค้าข้ามเครื่อง (iPhone → คอม) ====================
+// ปัญหา: localStorage แยกตามเครื่อง/เบราว์เซอร์ เพิ่มใน iPhone จึงไม่ขึ้นในคอม
+// วิธีแก้แบบไม่ต้องมี server: Export/Import ผ่านไฟล์ หรือ QR หรือ copy code
+// เพิ่มเมนู "ซิงค์ข้อมูล" ที่ให้ส่งข้อมูลสินค้าข้ามเครื่องได้ง่ายๆ
+
+var SK_SYNC = 'pos_sync_helper';
+
+// สร้างโค้ดข้อมูลสินค้า (บีบอัดเป็น base64) สำหรับส่งข้ามเครื่อง
+function exportProductsCode(){
+  var data = {
+    products: PRODUCTS,
+    categories: CATEGORIES,
+    nextId: (typeof nextId!=='undefined'?nextId:1),
+    ts: Date.now()
+  };
+  var json = JSON.stringify(data);
+  // encode เป็น base64 (รองรับ UTF-8)
+  var b64 = btoa(unescape(encodeURIComponent(json)));
+  return b64;
+}
+
+// นำเข้าข้อมูลจากโค้ด
+function importProductsCode(code, mode){
+  try {
+    var json = decodeURIComponent(escape(atob(code.trim())));
+    var data = JSON.parse(json);
+    if(!data.products || !Array.isArray(data.products)) throw new Error('รูปแบบข้อมูลไม่ถูกต้อง');
+
+    if(mode==='replace'){
+      // แทนที่ทั้งหมด
+      PRODUCTS.length = 0;
+      data.products.forEach(function(p){ PRODUCTS.push(p); });
+      if(data.categories && Array.isArray(data.categories)){
+        CATEGORIES.length = 0;
+        data.categories.forEach(function(c){ CATEGORIES.push(c); });
+      }
+      if(data.nextId && typeof nextId!=='undefined') nextId = data.nextId;
+    } else {
+      // รวม (merge) — เพิ่มเฉพาะที่ยังไม่มี (เทียบด้วยบาร์โค้ด หรือชื่อ)
+      var added=0, updated=0;
+      data.products.forEach(function(np){
+        var existing = null;
+        if(np.barcode) existing = PRODUCTS.find(function(p){ return p.barcode && p.barcode===np.barcode; });
+        if(!existing) existing = PRODUCTS.find(function(p){ return p.name===np.name; });
+        if(existing){
+          // อัปเดตข้อมูล
+          existing.price=np.price; existing.stock=np.stock; existing.cost=np.cost;
+          existing.cat=np.cat; existing.emoji=np.emoji;
+          if(np.priceRetail) existing.priceRetail=np.priceRetail;
+          if(np.priceWholesale) existing.priceWholesale=np.priceWholesale;
+          if(np.priceVip) existing.priceVip=np.priceVip;
+          updated++;
+        } else {
+          np.id = (typeof nextId!=='undefined') ? nextId++ : (PRODUCTS.length+1);
+          PRODUCTS.push(np);
+          added++;
+        }
+      });
+      // เพิ่มหมวดใหม่
+      if(data.categories){
+        data.categories.forEach(function(nc){
+          if(!CATEGORIES.find(function(c){return c.name===nc.name;})) CATEGORIES.push(nc);
+        });
+      }
+      window._syncResult = { added:added, updated:updated };
+    }
+    saveProducts();
+    if(typeof saveCategories==='function') saveCategories();
+    if(typeof saveStock==='function') saveStock();
+    renderProducts(); renderCategories();
+    return true;
+  } catch(e){
+    showToast('❌ นำเข้าไม่สำเร็จ: '+e.message);
+    return false;
+  }
+}
+
+function openSyncModal(){
+  openModal('syncModal');
+  switchSyncTab('send');
+}
+
+function switchSyncTab(tab){
+  document.getElementById('syncPaneSend').style.display = tab==='send'?'block':'none';
+  document.getElementById('syncPaneReceive').style.display = tab==='receive'?'block':'none';
+  document.getElementById('syncTabSend').className = 'pm-tab'+(tab==='send'?' active':'');
+  document.getElementById('syncTabReceive').className = 'pm-tab'+(tab==='receive'?' active':'');
+  if(tab==='send') renderSyncSend();
+}
+
+function renderSyncSend(){
+  var code = exportProductsCode();
+  var ta = document.getElementById('syncSendCode');
+  if(ta) ta.value = code;
+  var info = document.getElementById('syncSendInfo');
+  if(info) info.textContent = 'มีสินค้า '+PRODUCTS.length+' รายการ · ขนาดโค้ด '+(code.length/1024).toFixed(1)+' KB';
+  // สร้าง QR ถ้าโค้ดไม่ใหญ่เกิน (QR รับได้จำกัด ~2-3KB)
+  var qrWrap = document.getElementById('syncQrWrap');
+  if(qrWrap){
+    if(code.length < 2000){
+      loadQRLib().then(function(){
+        qrWrap.innerHTML = '';
+        try {
+          new QRCode(qrWrap, { text: code, width: 200, height: 200 });
+          qrWrap.style.display = 'block';
+          document.getElementById('syncQrNote').textContent = '📱 สแกน QR นี้จากอีกเครื่องได้ (ที่เมนูรับข้อมูล)';
+        } catch(e){ qrWrap.style.display='none'; }
+      }).catch(function(){ qrWrap.style.display='none'; });
+    } else {
+      qrWrap.style.display = 'none';
+      document.getElementById('syncQrNote').textContent = '⚠️ สินค้าเยอะเกินไปสำหรับ QR — ใช้วิธีคัดลอกโค้ด หรือดาวน์โหลดไฟล์แทน';
+    }
+  }
+}
+
+function copySyncCode(){
+  var ta = document.getElementById('syncSendCode');
+  ta.select();
+  try { document.execCommand('copy'); showToast('✅ คัดลอกโค้ดแล้ว — เอาไปวางในเครื่องอื่น'); }
+  catch(e){
+    if(navigator.clipboard){ navigator.clipboard.writeText(ta.value).then(function(){ showToast('✅ คัดลอกแล้ว'); }); }
+  }
+}
+
+function downloadSyncFile(){
+  var code = exportProductsCode();
+  var blob = new Blob([code], {type:'text/plain'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  var d = new Date();
+  a.href = url;
+  a.download = 'abshop_สินค้า_'+d.getFullYear()+(d.getMonth()+1)+d.getDate()+'.txt';
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 500);
+  showToast('ดาวน์โหลดไฟล์ข้อมูลแล้ว');
+}
+
+function syncReceiveFile(e){
+  var file = e.target.files[0];
+  if(!file) return;
+  var reader = new FileReader();
+  reader.onload = function(ev){
+    document.getElementById('syncReceiveCode').value = ev.target.result.trim();
+    showToast('อ่านไฟล์แล้ว กด "นำเข้าข้อมูล" เพื่อยืนยัน');
+  };
+  reader.readAsText(file);
+}
+
+function doSyncReceive(mode){
+  var code = document.getElementById('syncReceiveCode').value.trim();
+  if(!code){ showToast('กรุณาวางโค้ดหรือเลือกไฟล์ก่อน'); return; }
+  var confirmMsg = mode==='replace'
+    ? 'จะลบสินค้าเดิมทั้งหมดแล้วแทนที่ด้วยข้อมูลใหม่\n(ใช้เมื่อต้องการให้เครื่องนี้เหมือนเครื่องต้นทางเป๊ะ)'
+    : 'จะรวมข้อมูล เพิ่มสินค้าใหม่ + อัปเดตของเดิม\n(สินค้าที่มีอยู่จะไม่หาย)';
+  showConfirm(mode==='replace'?'แทนที่ข้อมูลทั้งหมด':'รวมข้อมูล', confirmMsg, '🔄', 'ยืนยัน', '').then(function(ok){
+    if(!ok) return;
+    var success = importProductsCode(code, mode);
+    if(success){
+      closeModal('syncModal');
+      var r = window._syncResult;
+      if(mode==='merge' && r){ showToast('✅ รวมข้อมูลสำเร็จ: เพิ่ม '+r.added+' · อัปเดต '+r.updated); }
+      else { showToast('✅ นำเข้าข้อมูลสำเร็จ ('+PRODUCTS.length+' รายการ)'); }
+    }
+  });
+}
+
+// โหลดไลบรารี QR สำหรับสร้าง (ใช้ qrcodejs)
+function loadQRLib(){
+  return new Promise(function(resolve, reject){
+    if(window.QRCode){ resolve(); return; }
+    var s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+    s.onload = function(){ resolve(); };
+    s.onerror = function(){ reject(); };
+    document.head.appendChild(s);
+  });
+}
+
+// เพิ่มปุ่ม "ซิงค์ข้อมูล" ในหน้าจัดการสินค้า
+(function injectSyncButton(){
+  var _origOpen = window.openProductManager;
+  window.openProductManager = function(){
+    _origOpen();
+    setTimeout(function(){
+      var bar = document.getElementById('pmImportBtns');
+      if(bar && !document.getElementById('pmSyncBtn')){
+        var b = document.createElement('button');
+        b.id = 'pmSyncBtn';
+        b.style.cssText = 'padding:8px 14px;background:#5e35b1;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;font-family:Sarabun,sans-serif';
+        b.innerHTML = '🔄 ซิงค์ข้อมูลข้ามเครื่อง';
+        b.onclick = function(){ openSyncModal(); };
+        bar.appendChild(b);
+      }
+    }, 90);
+  };
+})();
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 9: Firebase Cloud Sync (sync ทุกเครื่อง realtime)
+// ============================================================
+
+// ---------- Firebase config ----------
+var FIREBASE_CONFIG = {
+  apiKey: "AIzaSyD6sGZXnqs4PqKAhspKeVB-jz4rRGc4qm4",
+  authDomain: "atomshop-pos.firebaseapp.com",
+  projectId: "atomshop-pos",
+  storageBucket: "atomshop-pos.firebasestorage.app",
+  messagingSenderId: "69944350843",
+  appId: "1:69944350843:web:1228780d70cf5499082ade"
+};
+
+// ---------- keys ที่ sync ขึ้น cloud (ข้อมูลร้านที่ต้องตรงกันทุกเครื่อง) ----------
+var SYNC_KEYS = [
+  'pos_products_v4',       // สินค้า
+  'pos_categories_v1',     // หมวดหมู่
+  'pos_stock_v3',          // สต็อก
+  'pos_settings_v1',       // ตั้งค่าร้าน
+  'pos_promos_v1',         // โปรโมชั่น
+  'pos_coupons_v1',        // คูปอง
+  'pos_staff_v1',          // พนักงาน
+  'pos_monthly_v3',        // ยอดขายรายเดือน
+  'pos_daily_v3',          // ยอดขายรายวัน
+  'pos_returns_v1',        // การคืนสินค้า
+  'pos_voids_v1',          // บิลยกเลิก
+  'pos_pts_config_v1',     // ตั้งค่าแต้ม
+  'pos_pts_log_v1',        // ประวัติแต้ม
+  'pos_stock_in_v1',       // รับสินค้าเข้า
+  'pos_promptpay_v2',      // พร้อมเพย์
+  'pos_promptpay_img_v1',  // รูป QR พร้อมเพย์
+  'pos_receipt_design_v1', // ดีไซน์ใบเสร็จ
+  'pos_cat_colors_v1'      // สีหมวดหมู่ (ให้ตรงกันทุกเครื่อง)
+];
+// keys ที่ "ไม่" sync (เฉพาะเครื่อง): current_order, held_orders, display_mode,
+//   theme, shortcuts, login_cred, vat_pref, auto_backup — แยกตามเครื่องถูกต้องแล้ว
+
+var SK_SYNC_ENABLED = 'pos_cloud_sync_enabled';
+var SK_SHOP_ID = 'pos_cloud_shop_id';
+
+// ---------- สถานะ sync ----------
+var fbApp = null, fbDb = null, fbReady = false, fbSyncing = false;
+var fbUnsubscribers = [];
+var fbApplyingRemote = false; // กันวนลูป (remote → local → remote)
+var fbWriteTimers = {};
+var SHOP_ID = 'main'; // ร้านเดียว ใช้ document เดียว (ถ้าหลายสาขาเปลี่ยนตรงนี้)
+
+function isCloudSyncEnabled(){
+  return localStorage.getItem(SK_SYNC_ENABLED)==='1';
+}
+function setCloudSyncEnabled(on){
+  localStorage.setItem(SK_SYNC_ENABLED, on?'1':'0');
+}
+
+// ---------- โหลด Firebase SDK (แบบ compat ใช้ง่ายกับโค้ดเดิม) ----------
+function loadFirebaseSDK(){
+  return new Promise(function(resolve, reject){
+    if(window.firebase && window.firebase.firestore){ resolve(); return; }
+    var scripts = [
+      'https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js',
+      'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js'
+    ];
+    var loaded = 0;
+    function loadOne(i){
+      if(i>=scripts.length){ resolve(); return; }
+      var s = document.createElement('script');
+      s.src = scripts[i];
+      s.onload = function(){ loadOne(i+1); };
+      s.onerror = function(){ reject(new Error('โหลด Firebase SDK ไม่ได้ (ต้องต่อเน็ต)')); };
+      document.head.appendChild(s);
+    }
+    loadOne(0);
+  });
+}
+
+// ---------- เริ่มต้น Firebase ----------
+async function initFirebase(){
+  if(fbReady) return true;
+  try {
+    updateSyncStatus('connecting');
+    await loadFirebaseSDK();
+    if(!window.firebase.apps || !window.firebase.apps.length){
+      fbApp = firebase.initializeApp(FIREBASE_CONFIG);
+    } else {
+      fbApp = firebase.app();
+    }
+    fbDb = firebase.firestore();
+    // เปิด offline persistence (ทำงานต่อได้แม้เน็ตหลุด)
+    try {
+      await fbDb.enablePersistence({ synchronizeTabs:true });
+    } catch(e){ /* persistence อาจเปิดไม่ได้ในบางเบราว์เซอร์ ไม่เป็นไร */ }
+    fbReady = true;
+    updateSyncStatus('connected');
+    return true;
+  } catch(e){
+    updateSyncStatus('error', e.message);
+    return false;
+  }
+}
+
+// ---------- อ้างอิง collection: shops/{SHOP_ID}/data/{key} ----------
+function fbDocRef(key){
+  return fbDb.collection('shops').doc(SHOP_ID).collection('data').doc(key);
+}
+
+// ---------- ดันข้อมูล local ขึ้น cloud (เขียน) ----------
+function pushToCloud(key, value){
+  if(!fbReady || !isCloudSyncEnabled()) return;
+  if(fbApplyingRemote) return; // อย่าดันกลับตอนกำลังรับจาก remote
+  // debounce การเขียน (กันเขียนถี่เกิน)
+  clearTimeout(fbWriteTimers[key]);
+  fbWriteTimers[key] = setTimeout(function(){
+    try {
+      var payload = { value: value, updatedAt: Date.now(), device: getDeviceId() };
+      fbDocRef(key).set(payload).catch(function(err){
+        console.warn('sync push error', key, err.message);
+      });
+    } catch(e){ console.warn('sync push exception', e); }
+  }, 400);
+}
+
+// ---------- ฟังการเปลี่ยนจาก cloud (realtime) ----------
+function subscribeCloud(){
+  // ยกเลิกตัวเก่าก่อน
+  fbUnsubscribers.forEach(function(u){ try{u();}catch(e){} });
+  fbUnsubscribers = [];
+
+  SYNC_KEYS.forEach(function(key){
+    var unsub = fbDocRef(key).onSnapshot(function(doc){
+      if(!doc.exists) return;
+      var data = doc.data();
+      if(!data || data.value===undefined) return;
+      // ถ้าเป็นการเปลี่ยนจากเครื่องเราเอง ข้าม (กันวนลูป)
+      if(data.device === getDeviceId()) return;
+      // เขียนลง local โดยไม่ trigger push กลับ
+      fbApplyingRemote = true;
+      try {
+        _origSetItem.call(localStorage, key, data.value);
+      } catch(e){}
+      fbApplyingRemote = false;
+      // reload ข้อมูลในตัวแปร + re-render
+      reloadDataFromLocal(key);
+    }, function(err){
+      console.warn('sync subscribe error', key, err.message);
+    });
+    fbUnsubscribers.push(unsub);
+  });
+}
+
+// ---------- device id (แยกแต่ละเครื่อง) ----------
+function getDeviceId(){
+  var id = localStorage.getItem('pos_device_id');
+  if(!id){
+    id = 'dev_' + Math.random().toString(36).slice(2,10) + Date.now().toString(36);
+    _origSetItem.call(localStorage, 'pos_device_id', id);
+  }
+  return id;
+}
+
+// ---------- reload ตัวแปรในหน่วยความจำหลังรับข้อมูลใหม่ ----------
+function reloadDataFromLocal(key){
+  try {
+    switch(key){
+      case 'pos_products_v4':
+        if(typeof loadProducts==='function'){ loadProducts(); }
+        else { try{ PRODUCTS = JSON.parse(localStorage.getItem(key))||PRODUCTS; }catch(e){} }
+        if(typeof renderProducts==='function') renderProducts();
+        break;
+      case 'pos_categories_v1':
+        try{ CATEGORIES = JSON.parse(localStorage.getItem(key))||CATEGORIES; }catch(e){}
+        if(typeof renderCategories==='function') renderCategories();
+        if(typeof renderProducts==='function') renderProducts();
+        break;
+      case 'pos_stock_v3':
+        if(typeof loadStock==='function') loadStock();
+        if(typeof renderProducts==='function') renderProducts();
+        break;
+      case 'pos_settings_v1':
+        if(typeof loadShopSettings==='function'){ try{ window.shopSettings = loadShopSettings(); }catch(e){} }
+        break;
+      case 'pos_cat_colors_v1':
+        if(typeof loadCatColors==='function'){ try{ catColors = loadCatColors(); }catch(e){} }
+        if(typeof applyCatColors==='function') applyCatColors();
+        break;
+      case 'pos_monthly_v3':
+      case 'pos_daily_v3':
+        // รายงาน — re-render ถ้าหน้าเปิดอยู่
+        if(typeof switchReport==='function'){
+          try {
+            var rptOpen = document.getElementById('reportModal');
+            if(rptOpen && rptOpen.classList.contains('show')){ /* refresh เบาๆ */ }
+          } catch(e){}
+        }
+        break;
+      default:
+        // key อื่นๆ — reload ทั่วไป (ถ้ามี loader)
+        break;
+    }
+    // แจ้งเตือนเบาๆ ว่ามีข้อมูลอัปเดตจากเครื่องอื่น
+    showSyncPulse();
+  } catch(e){ console.warn('reload error', key, e); }
+}
+
+// ---------- intercept localStorage.setItem เพื่อ auto-push ----------
+var _origSetItem = localStorage.setItem.bind(localStorage);
+localStorage.setItem = function(key, value){
+  _origSetItem(key, value);
+  // ถ้า key นี้อยู่ในรายการ sync และเปิด sync อยู่ → ดันขึ้น cloud
+  if(SYNC_KEYS.indexOf(key) !== -1){
+    pushToCloud(key, value);
+  }
+};
+
+// ---------- อัปโหลดข้อมูลทั้งหมดขึ้น cloud (ครั้งแรก / manual) ----------
+async function uploadAllToCloud(){
+  if(!fbReady){ var ok = await initFirebase(); if(!ok) return false; }
+  var count = 0;
+  for(var i=0;i<SYNC_KEYS.length;i++){
+    var key = SYNC_KEYS[i];
+    var val = localStorage.getItem(key);
+    if(val !== null){
+      try {
+        await fbDocRef(key).set({ value: val, updatedAt: Date.now(), device: getDeviceId() });
+        count++;
+      } catch(e){ console.warn('upload error', key, e.message); }
+    }
+  }
+  return count;
+}
+
+// ---------- ดาวน์โหลดข้อมูลทั้งหมดจาก cloud (ครั้งแรกบนเครื่องใหม่) ----------
+async function downloadAllFromCloud(){
+  if(!fbReady){ var ok = await initFirebase(); if(!ok) return false; }
+  var count = 0;
+  for(var i=0;i<SYNC_KEYS.length;i++){
+    var key = SYNC_KEYS[i];
+    try {
+      var doc = await fbDocRef(key).get();
+      if(doc.exists){
+        var data = doc.data();
+        if(data && data.value!==undefined){
+          fbApplyingRemote = true;
+          _origSetItem(key, data.value);
+          fbApplyingRemote = false;
+          count++;
+        }
+      }
+    } catch(e){ console.warn('download error', key, e.message); }
+  }
+  // reload ทุกอย่าง
+  if(count>0){ reloadEverything(); }
+  return count;
+}
+
+function reloadEverything(){
+  SYNC_KEYS.forEach(function(key){ reloadDataFromLocal(key); });
+  if(typeof init==='function'){
+    // ไม่เรียก init ซ้ำ (จะซ้อน event) แค่ re-render หลักๆ
+  }
+  if(typeof renderProducts==='function') renderProducts();
+  if(typeof renderCategories==='function') renderCategories();
+}
+
+
+// ==================== UI: สถานะและการควบคุม Cloud Sync ====================
+var syncStatusState = 'off';
+
+function updateSyncStatus(state, msg){
+  syncStatusState = state;
+  var badge = document.getElementById('syncStatusBadge');
+  if(!badge) return;
+  var map = {
+    off:       { icon:'☁️', text:'ไม่ได้ซิงค์', color:'#999', bg:'#f0f0f0' },
+    connecting:{ icon:'🔄', text:'กำลังเชื่อม...', color:'#e65100', bg:'#fff3e0' },
+    connected: { icon:'✅', text:'ซิงค์แล้ว', color:'#2e7d32', bg:'#e8f5e9' },
+    error:     { icon:'⚠️', text:'เชื่อมไม่ได้', color:'#c62828', bg:'#ffebee' }
+  };
+  var s = map[state]||map.off;
+  badge.style.background = s.bg;
+  badge.style.color = s.color;
+  badge.innerHTML = s.icon+' '+s.text;
+  badge.title = msg||s.text;
+}
+
+// pulse เบาๆ เมื่อมีข้อมูลอัปเดตจากเครื่องอื่น
+function showSyncPulse(){
+  var badge = document.getElementById('syncStatusBadge');
+  if(!badge) return;
+  badge.style.transition = 'transform 0.2s';
+  badge.style.transform = 'scale(1.15)';
+  setTimeout(function(){ badge.style.transform = 'scale(1)'; }, 200);
+}
+
+// แทรก badge สถานะใน topbar
+(function injectSyncBadge(){
+  function doInject(){
+    var topRight = document.querySelector('.topbar-right');
+    if(!topRight || document.getElementById('syncStatusBadge')) return;
+    var badge = document.createElement('button');
+    badge.id = 'syncStatusBadge';
+    badge.className = 'tb-btn';
+    badge.style.cssText = 'font-size:11px;padding:5px 10px;border:none;cursor:pointer';
+    badge.innerHTML = '☁️ ไม่ได้ซิงค์';
+    badge.onclick = function(){ openCloudSyncModal(); };
+    topRight.insertBefore(badge, topRight.firstChild);
+    updateSyncStatus(isCloudSyncEnabled()?'connecting':'off');
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', doInject);
+  else doInject();
+})();
+
+function openCloudSyncModal(){
+  openModal('cloudSyncModal');
+  renderCloudSyncModal();
+}
+
+function renderCloudSyncModal(){
+  var enabled = isCloudSyncEnabled();
+  var body = document.getElementById('cloudSyncBody');
+  if(!body) return;
+  var statusText = {
+    off:'ยังไม่เปิดซิงค์', connecting:'กำลังเชื่อมต่อ...', connected:'เชื่อมต่อแล้ว ข้อมูลตรงกันทุกเครื่อง', error:'เชื่อมต่อไม่ได้'
+  }[syncStatusState] || '';
+
+  body.innerHTML = ''
+    + '<div style="text-align:center;padding:16px;background:'+(enabled?'#e8f5e9':'#f5f5f5')+';border-radius:12px;margin-bottom:16px">'
+    + '  <div style="font-size:40px;margin-bottom:8px">'+(enabled?'☁️✅':'☁️')+'</div>'
+    + '  <div style="font-size:15px;font-weight:700;color:'+(enabled?'#2e7d32':'#666')+'">'+(enabled?'เปิดซิงค์อยู่':'ยังไม่เปิดซิงค์')+'</div>'
+    + '  <div style="font-size:12px;color:var(--text-muted);margin-top:4px">'+statusText+'</div>'
+    + '</div>';
+
+  if(!enabled){
+    body.innerHTML += ''
+      + '<div style="font-size:13px;color:var(--text);margin-bottom:14px;line-height:1.6">'
+      + 'เมื่อเปิดซิงค์ ข้อมูลสินค้า สต็อก ยอดขาย และการตั้งค่าทั้งหมด จะถูกเก็บบน cloud และ<b>ตรงกันทุกเครื่อง</b>อัตโนมัติ เพิ่มสินค้าที่มือถือ ขึ้นที่คอมทันที'
+      + '</div>'
+      + '<div style="background:#fff8e1;border-radius:10px;padding:12px;font-size:12px;color:#a06000;margin-bottom:16px;border-left:3px solid var(--warning)">'
+      + '⚠️ <b>ครั้งแรกที่เปิด</b> เลือกว่าจะเอาข้อมูลจากเครื่องไหนเป็นหลัก:'
+      + '</div>'
+      + '<button class="pay-btn" style="background:#2e7d32;color:#fff;width:100%;margin-bottom:10px" onclick="enableSyncUpload()">📤 ใช้ข้อมูลในเครื่องนี้เป็นหลัก<br><span style="font-size:11px;font-weight:400;opacity:0.9">(อัปโหลดสินค้าในเครื่องนี้ขึ้น cloud — เลือกถ้าเครื่องนี้มีข้อมูลครบ)</span></button>'
+      + '<button class="pay-btn" style="background:#1565c0;color:#fff;width:100%" onclick="enableSyncDownload()">📥 ดึงข้อมูลจาก cloud มาใช้<br><span style="font-size:11px;font-weight:400;opacity:0.9">(โหลดข้อมูลจากเครื่องอื่นที่เคยอัปไว้ — เลือกถ้าเครื่องนี้เป็นเครื่องใหม่)</span></button>';
+  } else {
+    body.innerHTML += ''
+      + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;text-align:center">รหัสร้าน: <b>'+SHOP_ID+'</b> · เครื่องนี้: <span style="font-family:monospace">'+getDeviceId().slice(0,12)+'</span></div>'
+      + '<button class="pay-btn" style="background:var(--bg);color:var(--text);border:1.5px solid var(--border);width:100%;margin-bottom:10px" onclick="manualUploadNow()">📤 อัปโหลดข้อมูลเครื่องนี้ขึ้น cloud อีกครั้ง</button>'
+      + '<button class="pay-btn" style="background:var(--bg);color:var(--text);border:1.5px solid var(--border);width:100%;margin-bottom:10px" onclick="manualDownloadNow()">📥 ดึงข้อมูลล่าสุดจาก cloud</button>'
+      + '<button class="pay-btn" style="background:#ffebee;color:#c62828;border:1.5px solid #ef9a9a;width:100%" onclick="disableSync()">⏸️ ปิดซิงค์ (ใช้เฉพาะเครื่องนี้)</button>';
+  }
+}
+
+async function enableSyncUpload(){
+  showToast('กำลังเชื่อมต่อ cloud...');
+  var ok = await initFirebase();
+  if(!ok){ showToast('❌ เชื่อมต่อไม่ได้ เช็คอินเทอร์เน็ต'); return; }
+  var count = await uploadAllToCloud();
+  setCloudSyncEnabled(true);
+  subscribeCloud();
+  renderCloudSyncModal();
+  showToast('✅ เปิดซิงค์แล้ว อัปโหลด '+count+' รายการขึ้น cloud');
+}
+
+async function enableSyncDownload(){
+  showToast('กำลังดึงข้อมูลจาก cloud...');
+  var ok = await initFirebase();
+  if(!ok){ showToast('❌ เชื่อมต่อไม่ได้ เช็คอินเทอร์เน็ต'); return; }
+  var count = await downloadAllFromCloud();
+  setCloudSyncEnabled(true);
+  subscribeCloud();
+  renderCloudSyncModal();
+  showToast('✅ เปิดซิงค์แล้ว ดึง '+count+' รายการจาก cloud');
+}
+
+async function manualUploadNow(){
+  showToast('กำลังอัปโหลด...');
+  var count = await uploadAllToCloud();
+  showToast('✅ อัปโหลด '+count+' รายการแล้ว');
+}
+async function manualDownloadNow(){
+  showToast('กำลังดึงข้อมูล...');
+  var count = await downloadAllFromCloud();
+  showToast('✅ ดึง '+count+' รายการแล้ว');
+}
+
+function disableSync(){
+  showConfirm('ปิดซิงค์','ปิดการซิงค์ cloud?\nเครื่องนี้จะใช้ข้อมูลในเครื่องอย่างเดียว\n(ข้อมูลบน cloud ยังอยู่ เปิดใหม่ได้)','⏸️','ปิดซิงค์','').then(function(ok){
+    if(!ok) return;
+    setCloudSyncEnabled(false);
+    fbUnsubscribers.forEach(function(u){ try{u();}catch(e){} });
+    fbUnsubscribers = [];
+    updateSyncStatus('off');
+    renderCloudSyncModal();
+    showToast('ปิดซิงค์แล้ว');
+  });
+}
+
+// ---------- auto-start ถ้าเคยเปิด sync ไว้ ----------
+(function autoStartSync(){
+  function run(){
+    if(isCloudSyncEnabled()){
+      initFirebase().then(function(ok){
+        if(ok){ subscribeCloud(); }
+      });
+    }
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 800); // เผื่อ init ช้า
+})();
+
+
 </script>
 
 
@@ -9351,6 +10146,80 @@ function refreshDisplayModeSection(){
       <div style="font-size:11px;color:var(--text-muted);margin-top:10px;background:#fff8e1;border-radius:8px;padding:8px 12px;border-left:3px solid var(--warning)">
         💡 สินค้าที่ซ่อนจะไม่แสดงในหน้าขาย แต่ยังขายได้ด้วยการสแกน/ค้นหาบาร์โค้ด และข้อมูลยังอยู่ครบ
       </div>
+    </div>
+  </div>
+</div>
+
+
+
+<!-- MODAL: ซิงค์ข้อมูลข้ามเครื่อง -->
+<div class="modal-overlay" id="syncModal">
+  <div class="modal" style="width:560px;max-width:97vw">
+    <div class="modal-header" style="background:linear-gradient(135deg,#5e35b1,#9575cd)">
+      <h3>🔄 ซิงค์ข้อมูลสินค้าข้ามเครื่อง</h3>
+      <button class="modal-close" onclick="closeModal('syncModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="background:#ede7f6;border:1px solid #b39ddb;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:12px;color:#4527a0">
+        💡 ระบบเก็บข้อมูลแยกตามเครื่อง (มือถือกับคอมไม่เชื่อมกันเอง) — ใช้เมนูนี้ส่งข้อมูลสินค้าจากเครื่องหนึ่งไปอีกเครื่อง
+      </div>
+      <div class="pm-tabs" style="margin-bottom:14px">
+        <button class="pm-tab active" id="syncTabSend" onclick="switchSyncTab('send')">📤 ส่งข้อมูล (จากเครื่องนี้)</button>
+        <button class="pm-tab" id="syncTabReceive" onclick="switchSyncTab('receive')">📥 รับข้อมูล (มาที่เครื่องนี้)</button>
+      </div>
+
+      <!-- ส่งข้อมูล -->
+      <div id="syncPaneSend">
+        <div id="syncSendInfo" style="font-size:12px;color:var(--text-muted);margin-bottom:8px;text-align:center"></div>
+        <div id="syncQrWrap" style="display:none;text-align:center;margin:0 auto 8px;padding:12px;background:#fff;border-radius:10px;width:fit-content"></div>
+        <div id="syncQrNote" style="font-size:11px;color:var(--text-muted);text-align:center;margin-bottom:10px"></div>
+        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">โค้ดข้อมูล (คัดลอกไปวางในเครื่องอื่น):</label>
+        <textarea id="syncSendCode" readonly style="width:100%;height:80px;border:1.5px solid var(--border);border-radius:8px;padding:8px;font-family:monospace;font-size:10px;resize:none;background:var(--bg)" onclick="this.select()"></textarea>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="pay-btn" style="background:#5e35b1;color:#fff;flex:2" onclick="copySyncCode()">📋 คัดลอกโค้ด</button>
+          <button class="pay-btn" style="background:var(--bg);color:var(--text);border:1.5px solid var(--border);flex:2" onclick="downloadSyncFile()">💾 ดาวน์โหลดไฟล์</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:10px;background:var(--bg);border-radius:8px;padding:10px 12px">
+          <b>วิธีใช้:</b><br>
+          1. กดคัดลอกโค้ด (หรือดาวน์โหลดไฟล์)<br>
+          2. ส่งให้อีกเครื่อง (เช่น ส่งทาง LINE, อีเมล, หรือ AirDrop)<br>
+          3. ที่อีกเครื่อง เปิดเมนูนี้ → แท็บ "รับข้อมูล" → วางโค้ด → กดนำเข้า
+        </div>
+      </div>
+
+      <!-- รับข้อมูล -->
+      <div id="syncPaneReceive" style="display:none">
+        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">วางโค้ดข้อมูลที่นี่:</label>
+        <textarea id="syncReceiveCode" placeholder="วางโค้ดที่คัดลอกมาจากอีกเครื่อง..." style="width:100%;height:100px;border:1.5px solid var(--border);border-radius:8px;padding:8px;font-family:monospace;font-size:10px;resize:none"></textarea>
+        <div style="text-align:center;margin:10px 0;font-size:12px;color:var(--text-muted)">— หรือ —</div>
+        <label style="display:block;text-align:center;padding:12px;border:2px dashed var(--border);border-radius:10px;cursor:pointer;background:var(--bg)">
+          📁 เลือกไฟล์ข้อมูล (.txt)
+          <input type="file" accept=".txt" style="display:none" onchange="syncReceiveFile(event)">
+        </label>
+        <div style="display:flex;gap:8px;margin-top:14px">
+          <button class="pay-btn" style="background:#2e7d32;color:#fff;flex:1;font-size:13px" onclick="doSyncReceive('merge')">➕ รวมข้อมูล</button>
+          <button class="pay-btn" style="background:#e65100;color:#fff;flex:1;font-size:13px" onclick="doSyncReceive('replace')">🔁 แทนที่ทั้งหมด</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:10px;background:var(--bg);border-radius:8px;padding:10px 12px">
+          <b>➕ รวมข้อมูล</b> = เพิ่มสินค้าใหม่ + อัปเดตของเดิม (สินค้าที่มีอยู่ไม่หาย) — แนะนำ<br>
+          <b>🔁 แทนที่ทั้งหมด</b> = ลบของเดิมหมด ใช้ข้อมูลใหม่แทน (ใช้เมื่ออยากให้เหมือนเครื่องต้นทางเป๊ะ)
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+
+<!-- MODAL: Cloud Sync -->
+<div class="modal-overlay" id="cloudSyncModal">
+  <div class="modal" style="width:440px;max-width:96vw">
+    <div class="modal-header" style="background:linear-gradient(135deg,#0277bd,#4fc3f7)">
+      <h3>☁️ ซิงค์ข้อมูลอัตโนมัติ (Cloud)</h3>
+      <button class="modal-close" onclick="closeModal('cloudSyncModal')">✕</button>
+    </div>
+    <div class="modal-body" id="cloudSyncBody">
+      <!-- render โดย renderCloudSyncModal() -->
     </div>
   </div>
 </div>
