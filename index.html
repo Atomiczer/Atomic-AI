@@ -807,23 +807,14 @@
   <span class="logo">🛍️ POS</span>
   <span class="session">ร้านค้าสาขา 1 · พนักงาน: พนักงานขาย</span>
   <div class="topbar-right">
-    <div class="vat-wrap">
-      <span>VAT 7%</span>
-      <label class="tog">
-        <input type="checkbox" id="vatToggle" checked onchange="calcTotal()">
-        <span class="tog-slider"></span>
-      </label>
-    </div>
-    <button class="tb-btn" onclick="openHold()">📋 พัก (<span id="holdCountSpan">0</span>)</button>
+    <button class="tb-btn" onclick="openHold()">พัก (<span id="holdCountSpan">0</span>)</button>
     <button class="tb-btn" onclick="holdOrder()">⏸ พักออเดอร์</button>
-    <button class="tb-btn" onclick="openCashDrawer()">🗄️ ลิ้นชัก</button>
     <button class="tb-btn" onclick="openStockIn()">📥 รับสินค้า</button>
     <button class="tb-btn" onclick="openProductManager()">🛒 จัดการสินค้า</button>
     <button class="tb-btn" onclick="openStockManager()" style="position:relative">📦 สต๊อก
     <span id="stockAlertBadge" onclick="event.stopPropagation();showStockAlertPopup()" style="display:none;position:absolute;top:-6px;right:-6px;background:#e53935;color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;padding:0 3px;cursor:pointer;"></span>
     </button>
     <button class="tb-btn" onclick="openPromoManager()" style="background:rgba(255,107,53,0.25);border-color:rgba(255,200,100,0.5)">🎁 โปรโมชั่น <span id="promoActiveBadge" style="display:none;background:#f7c948;color:#333;border-radius:10px;padding:0 6px;font-size:10px;margin-left:3px"></span></button>
-    <button class="tb-btn" onclick="openPrinterSettings()">🖨 เครื่องพิมพ์</button>
     <button class="tb-btn" onclick="openReport()">📊 รายงาน</button>
     <button class="tb-btn" onclick="openReturnModal()">🔄 รับคืน</button>
     <button class="tb-btn" onclick="openSettings()">⚙️ ตั้งค่า</button>
@@ -948,8 +939,14 @@
       <div class="summary-row" id="discountRow" style="display:none;color:var(--danger)">
         <span>ส่วนลด</span><span id="discountAmt">-฿0</span>
       </div>
-      <div class="summary-row" id="vatRow">
-        <span>ภาษี (VAT 7%)</span>
+      <div class="summary-row" id="vatRow" style="align-items:center">
+        <span style="display:flex;align-items:center;gap:8px">
+          ภาษี (VAT 7%)
+          <label class="tog" style="margin:0;transform:scale(0.85)">
+            <input type="checkbox" id="vatToggle" checked onchange="calcTotal()">
+            <span class="tog-slider"></span>
+          </label>
+        </span>
         <span id="vatAmt">฿0</span>
       </div>
       <div class="vat-note" id="vatNote"></div>
@@ -3547,7 +3544,7 @@ function printReceipt() {
     +'<button onclick="window.print();setTimeout(function(){window.close();},800)" style="padding:10px 28px;background:'+color+';color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:Sarabun,sans-serif">🖨️ พิมพ์</button>'
     +'</div>'
 
-    +'<script>window.onload=function(){setTimeout(function(){window.print();},800);};<\/script>'
+    +'<script>window.onload=function(){setTimeout(function(){window.print();},800);};window.onafterprint=function(){window.close();};<\/script>'
     +'</body></html>';
 
   var win = window.open('','_blank','width=420,height:750,left=200,top=80');
@@ -4265,7 +4262,7 @@ function printReceiptA4() {
     +'<button onclick="window.print();setTimeout(function(){window.close();},800)" style="padding:12px 32px;background:#E91E8C;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;font-family:Sarabun,sans-serif;margin-right:8px">🖨️ พิมพ์</button>'
     +'<button onclick="window.close()" style="padding:12px 24px;background:#fff;color:#333;border:1.5px solid #ddd;border-radius:10px;font-size:15px;cursor:pointer;font-family:Sarabun,sans-serif">✕ ปิด</button>'
     +'</div>'
-    +'<script>setTimeout(function(){window.print();},800);<\/script>'
+    +'<script>setTimeout(function(){window.print();},800);window.onafterprint=function(){window.close();};<\/script>'
     +'</body></html>';
 
   var win = window.open('','_blank','width=900,height=750,left=100,top=50');
@@ -7433,6 +7430,70 @@ body.order-numbered .order-item .item-info::before {
 }
 </style>
 
+
+<!-- ============ POS v3.0 TABLE/CASHIER MODE ============ -->
+<style id="posV3TableStyles">
+/* ===== โหมดตาราง (Cashier) — กริดสินค้าซ้ายแคบ + ตารางรายการกลาง-ขวา ===== */
+body.density-table .left { flex: 0 0 clamp(200px, 24vw, 300px); }
+body.density-table .products {
+  grid-template-columns: repeat(auto-fill, minmax(clamp(72px, 7vw, 95px), 1fr)); gap: 6px; padding: 8px;
+}
+body.density-table .pcard { padding: 7px 5px; border-radius: 8px; }
+body.density-table .pemoji { font-size: 20px; margin-bottom: 2px; }
+body.density-table .pname { font-size: 10.5px; margin-bottom: 1px; line-height: 1.15; }
+body.density-table .pprice { font-size: 11px; }
+body.density-table .pstock { font-size: 8.5px; }
+body.density-table .pbarcode { display: none; }
+
+/* ขยายฝั่งขวา (ออเดอร์) ให้กว้างเป็นตาราง */
+body.density-table .right { width: clamp(420px, 52%, 900px); }
+
+/* หัวตาราง */
+.order-table-head {
+  display: none;
+  grid-template-columns: 30px 1fr 96px 62px 74px 30px;
+  gap: 4px; padding: 8px 10px; background: var(--primary); color: #fff;
+  font-size: 11.5px; font-weight: 600; border-radius: 8px 8px 0 0; margin: 0 4px;
+  position: sticky; top: 0; z-index: 5;
+}
+body.density-table .order-table-head { display: grid; }
+.order-table-head .oth-c { text-align: center; }
+.order-table-head .oth-r { text-align: right; }
+
+/* แถวตารางในโหมด table */
+body.density-table .order-items { gap: 0; padding: 0 4px; }
+body.density-table .order-item {
+  display: grid !important;
+  grid-template-columns: 30px 1fr 96px 62px 74px 30px;
+  gap: 4px; align-items: center; padding: 6px 10px !important;
+  border-bottom: 1px solid var(--border); animation: none;
+}
+body.density-table .order-item:nth-child(even) { background: var(--primary-pale); }
+/* ซ่อนส่วนที่ไม่ใช้ในโหมดตาราง */
+body.density-table .order-item .item-emoji { display: none; }
+body.density-table .order-item .item-unit { display: none; }
+body.density-table .order-item .item-note-btn { display: none; }
+body.density-table .order-item .item-controls { margin: 0; justify-content: center; }
+/* จัดวาง cell */
+body.density-table .order-item .otc-idx { font-size: 12px; color: var(--text-muted); text-align: center; }
+body.density-table .order-item .item-info { display: contents; }
+body.density-table .order-item .item-name {
+  font-size: 13px; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  grid-column: 2; align-self: center;
+}
+body.density-table .order-item .item-controls { grid-column: 3; }
+body.density-table .order-item .qty-btn { width: 24px; height: 24px; font-size: 15px; }
+body.density-table .order-item .qty-num { font-size: 13px; min-width: 24px; }
+body.density-table .order-item .otc-price { grid-column: 4; text-align: right; font-size: 12px; color: var(--text-muted); }
+body.density-table .order-item .item-price { grid-column: 5; text-align: right; font-size: 13px; font-weight: 700; }
+body.density-table .order-item .item-del { grid-column: 6; }
+/* ซ่อน wrapper ราคาเดิม (flex-column) เพราะเราแยก cell แล้ว */
+body.density-table .order-item > div:last-child { display: contents; }
+
+/* โน้ตในโหมดตาราง: แสดงเต็มแถวถัดไป */
+body.density-table .order-item .item-note-row { grid-column: 1 / -1; font-size: 11px; color: var(--text-muted); }
+</style>
+
 <!-- ============ POS v3.0 NEW MODALS ============ -->
 
 <!-- MODAL: กล้องสแกนบาร์โค้ด -->
@@ -7696,7 +7757,7 @@ var THEME_PRESETS = [
 
 function loadTheme(){
   try { var s=localStorage.getItem(SK_THEME); if(s) return JSON.parse(s); } catch(e){}
-  return { presetId:'pink', primary:'#E91E8C', fontScale:1, textColor:'#2c2c2c', custom:false };
+  return { presetId:'blue', primary:'#1565c0', fontScale:1, textColor:'#2c2c2c', custom:false };
 }
 function saveThemeData(t){ localStorage.setItem(SK_THEME, JSON.stringify(t)); }
 var currentTheme = loadTheme();
@@ -8387,7 +8448,7 @@ function printPriceLabels(){
     + '<button onclick="window.close()" style="padding:10px 20px;background:#fff;color:#333;border:1.5px solid #ddd;border-radius:8px;font-size:15px;cursor:pointer;font-family:Sarabun,sans-serif">✕ ปิด</button>'
     + '</div>'
     + '<div class="grid">'+labelsHtml+'</div>'
-    + '<script>window.onload=function(){document.querySelectorAll("svg.bc").forEach(function(el){try{JsBarcode(el,el.getAttribute("data-code"),{format:"CODE128",displayValue:false,margin:0,height:'+Math.round(cfg.barH*0.32)+'});}catch(e){}});setTimeout(function(){window.print();},700);};<\/script>'
+    + '<script>window.onload=function(){document.querySelectorAll("svg.bc").forEach(function(el){try{JsBarcode(el,el.getAttribute("data-code"),{format:"CODE128",displayValue:false,margin:0,height:'+Math.round(cfg.barH*0.32)+'});}catch(e){}});setTimeout(function(){window.print();},700);window.onafterprint=function(){window.close();};};<\/script>'
     + '</body></html>';
 
   var win = window.open('','_blank','width=900,height=700');
@@ -8542,7 +8603,7 @@ function saveThemeSettings(){
 }
 
 function resetThemeDefault(){
-  currentTheme = { presetId:'pink', primary:'#E91E8C', fontScale:1, textColor:'#2c2c2c', custom:false };
+  currentTheme = { presetId:'blue', primary:'#1565c0', fontScale:1, textColor:'#2c2c2c', custom:false };
   saveThemeData(currentTheme);
   applyTheme(currentTheme);
   renderThemePane();
@@ -10119,6 +10180,757 @@ function disableSync(){
 })();
 
 
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 10: Enter ยืนยันทุก modal, ปิดหน้าพิมพ์อัตโนมัติ, ช่องรายการแคบลง
+// ============================================================
+
+// ==================== ข้อ 1: Enter ยืนยันในทุก modal ชำระเงิน/ยืนยัน ====================
+// map: modal id → ฟังก์ชันที่จะเรียกเมื่อกด Enter
+var ENTER_ACTIONS = {
+  'qrModal':     function(){ confirmPayment('qr'); },
+  'cashModal':   function(){ confirmPayment('cash'); },
+  'successModal':function(){ closeModal('successModal'); newOrder(); },
+  'splitModal':  function(){ if(typeof confirmPayment==='function') confirmPayment('split'); }
+};
+
+document.addEventListener('keydown', function(e){
+  if(e.key!=='Enter') return;
+  // หา modal ที่เปิดอยู่ (show) และอยู่ในรายการ
+  for(var id in ENTER_ACTIONS){
+    var m = document.getElementById(id);
+    if(m && m.classList.contains('show')){
+      // ยกเว้นถ้ากำลังพิมพ์ใน textarea (ต้องการขึ้นบรรทัดใหม่)
+      var active = document.activeElement;
+      if(active && active.tagName && active.tagName.toLowerCase()==='textarea') return;
+      e.preventDefault();
+      e.stopPropagation();
+      try { ENTER_ACTIONS[id](); } catch(err){ console.error(err); }
+      return;
+    }
+  }
+}, true); // capture phase
+
+// เพิ่มป้าย (Enter) ที่ปุ่มยืนยัน QR และ cash
+(function addEnterHints(){
+  function run(){
+    // QR
+    var qrBtns = document.querySelectorAll('#qrModal .pay-btn');
+    qrBtns.forEach(function(b){
+      if(b.textContent.includes('ยืนยัน') && !b.dataset.enterHint){
+        b.dataset.enterHint='1';
+        b.innerHTML += ' <span style="font-size:11px;opacity:0.85">(Enter)</span>';
+      }
+    });
+    // cash
+    var cashBtns = document.querySelectorAll('#cashModal .pay-btn');
+    cashBtns.forEach(function(b){
+      if(b.textContent.includes('ยืนยัน') && !b.dataset.enterHint){
+        b.dataset.enterHint='1';
+        b.innerHTML += ' <span style="font-size:11px;opacity:0.85">(Enter)</span>';
+      }
+    });
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 400);
+})();
+
+// ==================== ข้อ 3: ปิดหน้าพิมพ์อัตโนมัติหลังพิมพ์เสร็จ ====================
+// ปัญหา: หน้าต่าง print ที่เปิดใหม่ (ใบเสร็จ/ป้ายราคา) ไม่ปิดเอง
+// วิธีแก้: เพิ่ม window.onafterprint ในหน้าต่างที่เปิด ให้ปิดตัวเองหลังพิมพ์/ยกเลิก
+
+// hook การเปิดหน้าต่างพิมพ์ — เพิ่มสคริปต์ auto-close
+// (ต้องแก้ที่ตอนสร้าง HTML ของหน้า print — ทำผ่าน override ฟังก์ชัน print ที่มี)
+
+// สำหรับใบเสร็จ: หา function ที่เปิดหน้าพิมพ์ใบเสร็จ
+(function patchReceiptPrint(){
+  // มองหา printReceipt หรือ doPrint
+  var candidates = ['printReceipt','doPrintReceipt','printBill'];
+  candidates.forEach(function(fn){
+    if(typeof window[fn]==='function'){
+      var _orig = window[fn];
+      window[fn] = function(){
+        var result = _orig.apply(this, arguments);
+        return result;
+      };
+    }
+  });
+})();
+
+// ==================== ข้อ 2: ช่องรายการสินค้าในออเดอร์แคบลง (เห็นได้มากขึ้น) ====================
+// เพิ่ม CSS ให้ order-item กระชับ + panel ซ้าย(สินค้า)กว้างขึ้น
+(function injectCompactOrderCSS(){
+  var style = document.createElement('style');
+  style.id = 'compactOrderStyles';
+  style.textContent = ''
+    // ลด padding ในรายการออเดอร์ เพื่อเห็นได้มากขึ้น
+    + '.order-item { padding: 8px 0 !important; }'
+    + '.order-items { gap: 2px; }'
+    // ทำให้ชื่อสินค้าไม่ตัดบรรทัดเยอะ
+    + '.item-name { line-height: 1.3; }'
+    ;
+  document.head.appendChild(style);
+})();
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 11: โหมดตาราง (Cashier/ขายส่ง) สลับได้
+// ============================================================
+
+// ---------- เพิ่ม 'table' เป็นอีกโหมดใน density ----------
+// applyDisplayMode เดิมรองรับ comfortable/compact/dense — เพิ่ม table
+
+(function extendDensityForTable(){
+  var _origApply = window.applyDisplayMode;
+  window.applyDisplayMode = function(){
+    // ล้าง table ก่อน แล้วเรียกเดิม
+    document.body.classList.remove('density-table');
+    _origApply();
+    if(displayMode.density==='table'){
+      document.body.classList.add('density-table');
+      // เอา class อื่นออก (กันซ้อน)
+      document.body.classList.remove('density-compact','density-dense');
+      ensureOrderTableHead();
+    }
+    // อัปเดตปุ่ม active
+    var tableBtn = document.getElementById('denBtn_table');
+    if(tableBtn) tableBtn.className = 'den-btn'+(displayMode.density==='table'?' active':'');
+  };
+})();
+
+// ---------- เพิ่มปุ่ม "ตาราง" ในแถบมุมมอง ----------
+(function addTableDensityButton(){
+  function run(){
+    var bar = document.getElementById('densityBar');
+    if(!bar || document.getElementById('denBtn_table')) return;
+    var denseBtn = document.getElementById('denBtn_dense');
+    var tableBtn = document.createElement('button');
+    tableBtn.className = 'den-btn';
+    tableBtn.id = 'denBtn_table';
+    tableBtn.setAttribute('onclick', "setDensity('table')");
+    tableBtn.title = 'แบบตาราง เหมาะร้านขายส่ง/ซูเปอร์มาร์เก็ต บิลยาว';
+    tableBtn.textContent = 'ตาราง';
+    if(denseBtn && denseBtn.nextSibling){
+      denseBtn.parentNode.insertBefore(tableBtn, denseBtn.nextSibling);
+    } else if(denseBtn){
+      denseBtn.after(tableBtn);
+    } else {
+      bar.appendChild(tableBtn);
+    }
+    // apply เผื่อโหลดมาเป็นโหมด table อยู่แล้ว
+    if(displayMode.density==='table'){ tableBtn.className='den-btn active'; }
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 600);
+})();
+
+// ---------- สร้างหัวตาราง (order-table-head) เหนือ order-items ----------
+function ensureOrderTableHead(){
+  var orderItems = document.getElementById('orderItems');
+  if(!orderItems) return;
+  if(document.getElementById('orderTableHead')) return;
+  var head = document.createElement('div');
+  head.id = 'orderTableHead';
+  head.className = 'order-table-head';
+  head.innerHTML = ''
+    + '<div class="oth-c">#</div>'
+    + '<div>สินค้า</div>'
+    + '<div class="oth-c">จำนวน</div>'
+    + '<div class="oth-r">ราคา</div>'
+    + '<div class="oth-r">รวม</div>'
+    + '<div></div>';
+  orderItems.parentNode.insertBefore(head, orderItems);
+}
+
+// ---------- override renderOrder ให้สร้างแถวแบบตารางเมื่ออยู่ในโหมด table ----------
+(function hookRenderOrderTable(){
+  var _orig = window.renderOrder;
+  window.renderOrder = function(){
+    _orig();
+    // ถ้าอยู่โหมดตาราง เพิ่ม index cell + price cell ให้แต่ละแถว
+    if(displayMode.density==='table'){
+      ensureOrderTableHead();
+      decorateOrderRowsForTable();
+      // ซ่อน/แสดงหัวตามมีสินค้าไหม
+      var head = document.getElementById('orderTableHead');
+      if(head) head.style.display = (order && order.length) ? 'grid' : 'none';
+    } else {
+      var head = document.getElementById('orderTableHead');
+      if(head) head.style.display = 'none';
+    }
+  };
+})();
+
+// เพิ่ม cell ลำดับ + ราคาต่อหน่วย ให้แถว (CSS จัดตำแหน่งเอง)
+function decorateOrderRowsForTable(){
+  var items = document.querySelectorAll('#orderItems .order-item');
+  items.forEach(function(row, i){
+    // เพิ่มเลขลำดับ (ถ้ายังไม่มี)
+    if(!row.querySelector('.otc-idx')){
+      var idx = document.createElement('div');
+      idx.className = 'otc-idx';
+      idx.textContent = (i+1);
+      row.insertBefore(idx, row.firstChild);
+    } else {
+      row.querySelector('.otc-idx').textContent = (i+1);
+    }
+    // เพิ่มราคาต่อหน่วย cell (ดึงจาก item-unit เดิม)
+    if(!row.querySelector('.otc-price')){
+      var unitEl = row.querySelector('.item-unit');
+      var priceText = '';
+      if(unitEl){ priceText = unitEl.textContent.replace('/ ชิ้น','').replace('฿','').trim(); }
+      var pc = document.createElement('div');
+      pc.className = 'otc-price';
+      pc.textContent = '฿'+priceText;
+      // แทรกก่อน item-price (คอลัมน์รวม)
+      var infoDiv = row.querySelector('.item-info');
+      if(infoDiv) infoDiv.appendChild(pc);
+    }
+  });
+}
+
+// ---------- re-render เมื่อสลับเข้าโหมดตาราง ----------
+(function reRenderOnTableSwitch(){
+  var _origSet = window.setDensity;
+  window.setDensity = function(d){
+    _origSet(d);
+    if(typeof renderOrder==='function') renderOrder();
+    if(d==='table') ensureOrderTableHead();
+  };
+})();
+
+// ---------- เพิ่มคำอธิบายโหมดตารางในหน้าตั้งค่า (buildDisplayModeSection) ----------
+(function extendDisplayModeSection(){
+  var _orig = window.buildDisplayModeSection;
+  if(typeof _orig!=='function') return;
+  window.buildDisplayModeSection = function(){
+    var html = _orig();
+    // แทรกตัวเลือกตาราง ก่อน </div> ของ radio group (หลัง dense)
+    var tableOption = ''
+      + '  <label class="dm-opt" style="display:flex;align-items:center;gap:10px;padding:10px;border:1.5px solid var(--border);border-radius:10px;cursor:pointer" onclick="setDensity(\'table\');refreshDisplayModeSection()">'
+      + '    <input type="radio" name="dmDensity" '+(displayMode.density==='table'?'checked':'')+' style="accent-color:var(--primary)">'
+      + '    <div><div style="font-size:13px;font-weight:600">▤ ตาราง (Cashier)</div><div style="font-size:11px;color:var(--text-muted)">กริดสินค้าเล็ก + ตารางรายการใหญ่ เหมาะขายส่ง บิลยาวมาก</div></div></label>';
+    // แทรกหลัง option dense (มองหา marker '☰ รายการ')
+    var marker = '</label>';
+    // แทรกก่อนปิด div ของ radio group — หา '</div>\n    <div style="display:flex;gap:8px' (ส่วน checkbox)
+    var anchor = html.indexOf('<div style="display:flex;gap:8px;margin-top:10px">');
+    if(anchor!==-1){
+      html = html.slice(0,anchor) + tableOption + '\n' + html.slice(anchor);
+    }
+    return html;
+  };
+})();
+
+// ---------- init: apply ถ้าโหลดมาเป็นโหมดตาราง ----------
+(function initTableMode(){
+  function run(){
+    if(displayMode.density==='table'){
+      document.body.classList.add('density-table');
+      ensureOrderTableHead();
+      if(typeof renderOrder==='function') renderOrder();
+    }
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 700);
+})();
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 12: Enter ในทุก modal ชำระเงิน + ปิดพิมพ์เสถียร
+// ============================================================
+
+// ==================== ข้อ 1: Enter ยืนยันในทุก modal ชำระเงิน ====================
+// cashModal มี Enter แล้ว — เพิ่ม qrModal, creditModal, splitModal
+document.addEventListener('keydown', function(e){
+  if(e.key!=='Enter') return;
+
+  // QR modal
+  var qr = document.getElementById('qrModal');
+  if(qr && qr.classList.contains('show')){
+    e.preventDefault(); e.stopPropagation();
+    if(typeof confirmPayment==='function') confirmPayment('qr');
+    return;
+  }
+  // Credit modal (ถ้ามี)
+  var credit = document.getElementById('creditModal');
+  if(credit && credit.classList.contains('show')){
+    e.preventDefault(); e.stopPropagation();
+    if(typeof confirmPayment==='function') confirmPayment('credit');
+    return;
+  }
+  // Split modal
+  var split = document.getElementById('splitModal');
+  if(split && split.classList.contains('show')){
+    // เฉพาะเมื่อไม่ได้โฟกัสในช่องกรอกตัวเลข (กัน Enter ตอนพิมพ์)
+    var active = document.activeElement;
+    var inField = active && (active.tagName==='INPUT');
+    if(!inField){
+      e.preventDefault(); e.stopPropagation();
+      if(typeof confirmPayment==='function') confirmPayment('split');
+    }
+    return;
+  }
+}, true); // capture phase
+
+// ==================== ข้อ 3: ปิดหน้าพิมพ์อัตโนมัติแบบเสถียร ====================
+// ปัญหา: Chrome บางเวอร์ชัน window.onafterprint ไม่ยิง หรือยิงช้า ทำให้หน้าพิมพ์ค้าง
+// วิธีแก้: ใช้หลายกลไกร่วมกัน — onafterprint + focus event + matchMedia + timeout สำรอง
+
+// สร้างสคริปต์ปิดหน้าต่างที่เสถียร (inject เข้าไปในหน้า print ทุกหน้า)
+window.PRINT_AUTOCLOSE_SCRIPT = ''
+  + '<script>'
+  + '(function(){'
+  + '  var closed=false;'
+  + '  function doClose(){ if(closed) return; closed=true; try{ window.close(); }catch(e){} }'
+  + '  function tryPrint(){ try{ window.focus(); window.print(); }catch(e){} }'
+  + '  // ปิดหลังพิมพ์เสร็จ (หลายกลไก)'
+  + '  window.onafterprint = doClose;'
+  + '  if(window.matchMedia){'
+  + '    var mql = window.matchMedia("print");'
+  + '    mql.addListener(function(m){ if(!m.matches){ setTimeout(doClose, 300); } });'
+  + '  }'
+  + '  // เมื่อ user กลับมาที่หน้าต่างนี้หลังปิด dialog พิมพ์ (focus) → ปิด'
+  + '  window.addEventListener("focus", function(){ setTimeout(doClose, 400); });'
+  + '  // เริ่มพิมพ์'
+  + '  window.onload = function(){ setTimeout(tryPrint, 500); };'
+  + '  // สำรอง: ถ้าทุกอย่างพลาด ปิดใน 60 วิ (กันค้าง)'
+  + '  setTimeout(doClose, 60000);'
+  + '})();'
+  + '<\/scr'+'ipt>';
+
+// override การสร้างหน้าพิมพ์ — แทนที่สคริปต์เดิมด้วยตัวที่เสถียรกว่า
+// (patch ผ่านการ intercept window.open + document.write)
+(function patchPrintWindows(){
+  var _origOpen = window.open;
+  window.open = function(url, name, features){
+    var win = _origOpen.call(window, url, name, features);
+    if(win && (!url || url==='' || url==='about:blank')){
+      // เป็นหน้าต่างที่เราจะ document.write เข้าไป — patch write ให้เสริมสคริปต์ปิด
+      try {
+        var _origWrite = win.document.write.bind(win.document);
+        win.document.write = function(html){
+          // เสริมกลไกปิดอัตโนมัติที่เสถียร ก่อน </body>
+          if(typeof html==='string' && html.indexOf('</body>')!==-1 && html.indexOf('PRINT_AUTOCLOSE')===-1){
+            var autoclose = '<span style="display:none">PRINT_AUTOCLOSE</span>'
+              + '<script>(function(){var c=false;function dc(){if(c)return;c=true;try{window.close();}catch(e){}}'
+              + 'window.onafterprint=dc;'
+              + 'if(window.matchMedia){window.matchMedia("print").addListener(function(m){if(!m.matches)setTimeout(dc,300);});}'
+              + 'window.addEventListener("focus",function(){setTimeout(dc,500);});'
+              + 'setTimeout(dc,60000);})();<\/scr'+'ipt>';
+            html = html.replace('</body>', autoclose+'</body>');
+          }
+          return _origWrite(html);
+        };
+      } catch(e){}
+    }
+    return win;
+  };
+})();
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 14: หน้าขายสไตล์ Desktop POS (Rango-like)
+// ============================================================
+// ปรับหน้าขายให้เหมือนรูป Rango POS: ยอดเงินใหญ่ขวาบน, ตารางกลาง,
+// เอาเฉพาะปุ่มสด+QR, ปุ่ม Enter เด่น
+
+var SK_RANGO_MODE = 'pos_rango_mode_v1';
+function isRangoMode(){ var v=localStorage.getItem(SK_RANGO_MODE); return v==='1'; } // เปิดเป็นค่าเริ่มต้น
+function setRangoMode(on){ localStorage.setItem(SK_RANGO_MODE, on?'1':'0'); }
+
+// ---------- ซ่อนปุ่มบัตรเครดิต + แยกชำระ (เอาแค่สด + QR) ----------
+function applyPaymentButtonsFilter(){
+  if(!isRangoMode()) return;
+  var credit = document.querySelector('.pay-btn.pay-credit');
+  if(credit) credit.style.display = 'none';
+  // ปุ่มแยกชำระ: แสดงไว้ (เอากลับมาแล้ว)
+  var split = document.querySelector('.pay-btn.pay-split');
+  if(split) split.style.display = '';
+}
+
+// ---------- สร้างแถบยอดเงินใหญ่ด้านบน (เหมือน 250.00 บาท ในรูป) ----------
+function ensureBigTotalDisplay(){
+  if(!isRangoMode()) return;
+  var right = document.querySelector('.right');
+  if(!right) return;
+  if(document.getElementById('rangoBigTotal')) return;
+  var big = document.createElement('div');
+  big.id = 'rangoBigTotal';
+  big.style.cssText = 'text-align:right;padding:10px 16px;background:linear-gradient(135deg,#f8fff8,#eeffee);border-bottom:2px solid #c8e6c9';
+  big.innerHTML = '<div style="font-size:11px;color:#666;margin-bottom:2px">ยอดสุทธิ</div>'
+    + '<div style="font-size:34px;font-weight:800;color:#2e7d32;line-height:1" id="rangoBigTotalAmt">฿0.00</div>';
+  // แทรกบนสุดของ right (ก่อน order-top)
+  right.insertBefore(big, right.firstChild);
+}
+
+function updateBigTotal(){
+  var el = document.getElementById('rangoBigTotalAmt');
+  if(!el) return;
+  var totalEl = document.getElementById('totalAmt');
+  if(totalEl){ el.textContent = totalEl.textContent; }
+}
+
+// ---------- hook calcTotal ให้อัปเดตยอดใหญ่ ----------
+(function hookCalcTotalBig(){
+  var _orig = window.calcTotal;
+  if(typeof _orig==='function'){
+    window.calcTotal = function(){
+      _orig.apply(this, arguments);
+      updateBigTotal();
+    };
+  }
+})();
+
+// ---------- ปุ่ม "ชำระเงิน (Enter)" เด่นๆ ด้านล่าง ----------
+function ensureRangoPayButton(){
+  if(!isRangoMode()) return;
+  var payArea = document.getElementById('payArea');
+  if(!payArea) return;
+  if(document.getElementById('rangoEnterPay')) return;
+  var btn = document.createElement('button');
+  btn.id = 'rangoEnterPay';
+  btn.className = 'pay-btn';
+  btn.style.cssText = 'background:linear-gradient(135deg,#2e7d32,#43a047);color:#fff;font-size:17px;font-weight:800;padding:16px;margin-top:4px;width:100%';
+  btn.innerHTML = '💵 ชำระเงิน (Enter)';
+  btn.onclick = function(){ if(order && order.length) openPayment('cash'); else showToast('ยังไม่มีสินค้าในออเดอร์'); };
+  payArea.appendChild(btn);
+}
+
+// ---------- Enter ที่หน้าขายหลัก = เปิดชำระเงินสด (ถ้ามีสินค้า) ----------
+document.addEventListener('keydown', function(e){
+  if(!isRangoMode()) return;
+  if(e.key!=='Enter') return;
+  // ไม่ทำงานถ้ามี modal เปิดอยู่ หรือกำลังพิมพ์ในช่อง (ยกเว้น searchInput ที่ว่าง)
+  var anyModal = document.querySelector('.modal-overlay.show');
+  if(anyModal) return;
+  var active = document.activeElement;
+  var tag = active ? active.tagName.toLowerCase() : '';
+  // ถ้าอยู่ในช่องค้นหาและมีข้อความ = ให้ handleSearchKeydown จัดการ (หาสินค้า)
+  if(active && active.id==='searchInput' && active.value.trim()) return;
+  if(tag==='input'||tag==='textarea'||tag==='select'){
+    if(active.id!=='searchInput') return;
+  }
+  // เปิดชำระเงินสด
+  if(order && order.length){
+    e.preventDefault();
+    openPayment('cash');
+  }
+});
+
+// ---------- init ----------
+(function initRango(){
+  function run(){
+    if(!isRangoMode()) return;
+    ensureBigTotalDisplay();
+    ensureRangoPayButton();
+    applyPaymentButtonsFilter();
+    updateBigTotal();
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 500);
+  setTimeout(run, 1200);
+})();
+
+// ---------- hook renderOrder ให้ update ยอดใหญ่ ----------
+(function hookRenderOrderBig(){
+  var _orig = window.renderOrder;
+  window.renderOrder = function(){
+    _orig.apply(this, arguments);
+    updateBigTotal();
+  };
+})();
+
+// ---------- เพิ่มปุ่มเปิด/ปิดโหมด Rango ในแท็บหน้าตา ----------
+(function addRangoToggle(){
+  var _orig = window.buildDisplayModeSection;
+  if(typeof _orig!=='function') return;
+  window.buildDisplayModeSection = function(){
+    var html = _orig();
+    html += '<div class="prod-form" style="margin-top:12px"><h4>🖥️ สไตล์หน้าขาย Desktop POS</h4>'
+      + '<label style="display:flex;align-items:center;gap:10px;padding:10px;border:1.5px solid var(--border);border-radius:10px;cursor:pointer;font-size:13px">'
+      + '<input type="checkbox" '+(isRangoMode()?'checked':'')+' onchange="toggleRangoMode(this.checked)" style="accent-color:var(--primary);width:18px;height:18px">'
+      + '<div><div style="font-weight:600">แสดงยอดเงินใหญ่ + ปุ่ม Enter (แบบ Rango POS)</div>'
+      + '<div style="font-size:11px;color:var(--text-muted)">ยอดสุทธิตัวใหญ่ + ปุ่มชำระเงินสด/QR + กด Enter ชำระได้เลย</div></div></label></div>';
+    return html;
+  };
+})();
+
+function toggleRangoMode(on){
+  setRangoMode(on);
+  showToast(on?'เปิดสไตล์ Desktop POS':'ปิดสไตล์ Desktop POS แล้ว');
+  setTimeout(function(){ location.reload(); }, 600);
+}
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 15: ธีมฟ้า, เอาปุ่มบัตร/แยกชำระออก, ซ่อนแถบมุมมอง
+// ============================================================
+
+// ---------- 1. บังคับธีมฟ้าสำหรับทุกเครื่อง (รวมเครื่องที่เคยตั้งค่าชมพู) ----------
+(function forceBlueTheme(){
+  try {
+    var THEME_MIGRATED = 'pos_theme_blue_migrated_v1';
+    if(!localStorage.getItem(THEME_MIGRATED)){
+      // เขียนทับธีมเป็นฟ้า (ครั้งเดียว)
+      var blueTheme = { presetId:'blue', primary:'#1565c0', fontScale:1, textColor:'#2c2c2c', custom:false };
+      localStorage.setItem('pos_theme_v1', JSON.stringify(blueTheme));
+      localStorage.setItem(THEME_MIGRATED, '1');
+      if(typeof currentTheme!=='undefined') currentTheme = blueTheme;
+    }
+  } catch(e){}
+})();
+
+// ---------- 2. เอาปุ่มบัตรเครดิต/เดบิต + แยกชำระ ออก (ถาวร) ----------
+(function removeExtraPayButtons(){
+  function run(){
+    var credit = document.querySelector('.pay-btn.pay-credit');
+    var split = document.querySelector('.pay-btn.pay-split');
+    if(credit) credit.style.display = 'none';
+    if(split) split.style.display = '';  // แสดงปุ่มแยกชำระ (เอากลับมาแล้ว)
+    // เอาปุ่ม rango enter pay ออกด้วย (ถ้ามี จากรอบก่อน) เพราะปิด rango แล้ว
+    var rangoBtn = document.getElementById('rangoEnterPay');
+    if(rangoBtn) rangoBtn.remove();
+    var rangoBig = document.getElementById('rangoBigTotal');
+    if(rangoBig) rangoBig.remove();
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 400);
+  setTimeout(run, 1000);
+})();
+
+// ---------- 3. ปิดการสร้างแถบมุมมอง (densityBar) ----------
+(function disableDensityBar(){
+  function run(){
+    var bar = document.getElementById('densityBar');
+    if(bar) bar.remove();
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 300);
+  setTimeout(run, 800);
+})();
+
+// ---------- 4. ปุ่มชำระเงินหน้าขาย: เปลี่ยนสีให้เข้าธีม + คงสด/QR เด่น ----------
+(function stylePayButtons(){
+  function run(){
+    var cash = document.querySelector('.pay-btn.pay-cash');
+    var qr = document.querySelector('.pay-btn.pay-qr');
+    if(cash){ cash.style.background = 'linear-gradient(135deg,#2e7d32,#43a047)'; cash.style.color='#fff'; }
+    if(qr){ qr.style.background = 'linear-gradient(135deg,#1565c0,#42a5f5)'; qr.style.color='#fff'; }
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 500);
+})();
+
+// ---------- 5. Enter ที่หน้าขาย = ชำระเงินสด (ยังคงไว้ แม้ปิด rango) ----------
+document.addEventListener('keydown', function(e){
+  if(e.key!=='Enter') return;
+  var anyModal = document.querySelector('.modal-overlay.show');
+  if(anyModal) return;
+  var active = document.activeElement;
+  var tag = active ? active.tagName.toLowerCase() : '';
+  if(active && active.id==='searchInput' && active.value.trim()) return; // ให้ค้นหาทำงานก่อน
+  if(tag==='input'||tag==='textarea'||tag==='select'){
+    if(active.id!=='searchInput') return;
+  }
+  if(typeof order!=='undefined' && order && order.length){
+    e.preventDefault();
+    if(typeof openPayment==='function') openPayment('cash');
+  }
+});
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 16: ลบปุ่มชำระซ้ำ, เอาปุ่มสแกนออก, VAT ล่าง
+// ============================================================
+
+// ---------- 1. ลบปุ่มชำระเงินซ้ำ (rangoEnterPay ที่ยังโผล่จาก Part 14) ----------
+(function removeRangoDupPay(){
+  function run(){
+    var rangoBtn = document.getElementById('rangoEnterPay');
+    if(rangoBtn) rangoBtn.remove();
+    var rangoBig = document.getElementById('rangoBigTotal');
+    if(rangoBig) rangoBig.remove();
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  // ลบซ้ำหลายรอบ เพราะ Part 14 อาจสร้างใหม่ตอน render
+  setTimeout(run, 200);
+  setTimeout(run, 600);
+  setTimeout(run, 1200);
+  setTimeout(run, 2000);
+})();
+
+// ปิดฟังก์ชันที่สร้างปุ่ม rango ซ้ำ (override ให้ไม่ทำอะไร)
+if(typeof window.ensureRangoPayButton==='function'){
+  window.ensureRangoPayButton = function(){};
+}
+if(typeof window.ensureBigTotalDisplay==='function'){
+  window.ensureBigTotalDisplay = function(){};
+}
+
+// ---------- 2. เอาปุ่ม "สแกน" ออกจาก topbar ----------
+(function removeScanButton(){
+  function run(){
+    var topRight = document.querySelector('.topbar-right');
+    if(!topRight) return;
+    var btns = topRight.querySelectorAll('.tb-btn');
+    btns.forEach(function(b){
+      var t = b.textContent || '';
+      if(t.includes('สแกน')){ b.remove(); }
+    });
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 300);
+  setTimeout(run, 800);
+  setTimeout(run, 1500);
+})();
+
+// ---------- 3. ปุ่มชำระเงินสด (สีเขียว) ตัวเดียวพอ — คงปุ่มเดิมใน payArea ----------
+// ปุ่มเดิม .pay-cash ยังอยู่ + Enter ยังใช้ได้ (จาก Part 15)
+// ป้าย (Enter) เพิ่มที่ปุ่มเดิมให้รู้ว่ากด Enter ได้
+(function labelCashButtonEnter(){
+  function run(){
+    var cash = document.querySelector('.pay-btn.pay-cash');
+    if(cash && !cash.dataset.enterLabeled){
+      // เพิ่มคำว่า (Enter) ถ้ายังไม่มี
+      if(!cash.textContent.includes('Enter')){
+        cash.innerHTML = cash.innerHTML.replace('ชำระเงินสด', 'ชำระเงินสด (Enter)');
+      }
+      cash.dataset.enterLabeled = '1';
+    }
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 500);
+  setTimeout(run, 1000);
+})();
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 17: ย้ายเครื่องพิมพ์เข้าตั้งค่า
+// ============================================================
+
+// เพิ่มแท็บ "🖨 เครื่องพิมพ์" ในหน้าตั้งค่า → กดแล้วเปิด printerModal เดิม
+(function addPrinterTabToSettings(){
+  function doInject(){
+    var tabsWrap = document.querySelector('#settingsModal .pm-tabs');
+    if(!tabsWrap || document.getElementById('stTab-printer')) return;
+
+    var printerTab = document.createElement('button');
+    printerTab.className = 'pm-tab';
+    printerTab.id = 'stTab-printer';
+    printerTab.innerHTML = '🖨 เครื่องพิมพ์';
+    printerTab.onclick = function(){
+      // ปิดตั้งค่า แล้วเปิด printerModal เดิม (ที่ทำงานได้อยู่แล้ว)
+      closeModal('settingsModal');
+      setTimeout(function(){
+        if(typeof openPrinterSettings==='function') openPrinterSettings();
+      }, 200);
+    };
+    // แทรกหลังแท็บใบเสร็จ (ก่อนแท็บธีม ถ้ามี)
+    var receiptTab = document.getElementById('stTab-receipt');
+    if(receiptTab && receiptTab.nextSibling){
+      tabsWrap.insertBefore(printerTab, receiptTab.nextSibling);
+    } else {
+      tabsWrap.appendChild(printerTab);
+    }
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', doInject);
+  else doInject();
+  setTimeout(doInject, 500);
+})();
+
+// เพิ่มปุ่มลัด "ตั้งค่าเครื่องพิมพ์" ในแท็บใบเสร็จด้วย (เผื่อหาง่าย)
+(function addPrinterLinkInReceipt(){
+  var _orig = window.switchStTab;
+  if(typeof _orig !== 'function') return;
+  window.switchStTab = function(tab){
+    _orig(tab);
+    if(tab==='receipt'){
+      setTimeout(function(){
+        var pane = document.getElementById('stPane-receipt');
+        if(pane && !document.getElementById('receiptPrinterLink')){
+          var link = document.createElement('button');
+          link.id = 'receiptPrinterLink';
+          link.style.cssText = 'width:100%;padding:12px;margin-top:12px;background:linear-gradient(135deg,#1565c0,#42a5f5);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;font-family:Sarabun,sans-serif';
+          link.innerHTML = '🖨 ตั้งค่าเครื่องพิมพ์ & พร้อมเพย์';
+          link.onclick = function(){
+            closeModal('settingsModal');
+            setTimeout(function(){ if(typeof openPrinterSettings==='function') openPrinterSettings(); }, 200);
+          };
+          pane.appendChild(link);
+        }
+      }, 50);
+    }
+  };
+})();
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 18: ทำให้สวิตช์ VAT เห็นตลอด (ไม่ซ่อนเมื่อปิด)
+// ============================================================
+
+// ปัญหา: calcTotal ซ่อนแถว vatRow เมื่อ VAT ปิด ทำให้หาสวิตช์ไม่เจอ
+// แก้: บังคับให้แถว VAT แสดงตลอด + ปรับข้อความให้ชัด
+
+(function keepVatRowVisible(){
+  // hook calcTotal ให้บังคับแสดง vatRow เสมอ (หลัง calcTotal เดิมทำงาน)
+  var _orig = window.calcTotal;
+  if(typeof _orig === 'function'){
+    window.calcTotal = function(){
+      _orig.apply(this, arguments);
+      var vatRow = document.getElementById('vatRow');
+      if(vatRow){
+        vatRow.style.display = 'flex'; // แสดงตลอด
+        var vt = document.getElementById('vatToggle');
+        var vatOn = vt ? vt.checked : false;
+        // ปรับข้อความยอด VAT ให้ชัดเมื่อปิด
+        var vatAmt = document.getElementById('vatAmt');
+        if(vatAmt && !vatOn){
+          vatAmt.textContent = 'ปิดอยู่';
+          vatAmt.style.color = 'var(--text-muted)';
+          vatAmt.style.fontSize = '11px';
+        } else if(vatAmt){
+          vatAmt.style.color = '';
+          vatAmt.style.fontSize = '';
+        }
+      }
+    };
+  }
+})();
+
+// เรียก calcTotal ครั้งแรกเพื่อให้แถว VAT แสดงทันที
+(function initVatRowVisible(){
+  function run(){
+    if(typeof calcTotal==='function') calcTotal();
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 500);
+})();
+
+
 </script>
 
 
@@ -10223,6 +11035,237 @@ function disableSync(){
     </div>
   </div>
 </div>
+
+
+<!-- ============ POS v3.0 — ปรับโหมดตารางให้เหมือน Desktop POS (รูปที่ 4) ============ -->
+<style id="posV3TablePolish">
+/* ===== โหมดตาราง: ปรับให้เหมือน Desktop Cashier POS ===== */
+
+/* ยอดรวมตัวใหญ่ เด่น (เหมือนเลข 250.00 บาท สีเขียวในรูป) */
+body.density-table .right .total-final,
+body.density-table #orderTotal,
+body.density-table .grand-total-amount {
+  font-size: 32px !important;
+  font-weight: 800 !important;
+}
+
+/* หัวตารางเข้ม อ่านง่าย */
+body.density-table .order-table-head {
+  background: linear-gradient(135deg, var(--primary), var(--primary-light));
+  font-size: 12px; letter-spacing: 0.3px;
+}
+
+/* แถวสลับสีอ่อนๆ + hover */
+body.density-table .order-item:hover { background: #fff8fc; }
+body.density-table .order-item:nth-child(even) { background: #faf6f9; }
+
+/* เส้นแบ่งคอลัมน์บางๆ ให้ดูเป็นตาราง */
+body.density-table .order-item {
+  border-bottom: 1px solid #f0e0eb !important;
+}
+
+/* ปุ่มจำนวน +/- กะทัดรัดแบบ desktop */
+body.density-table .qty-btn {
+  border-radius: 5px !important; background: var(--bg);
+  border: 1px solid var(--border) !important;
+}
+
+/* คอลัมน์ราคารวม เด่นขึ้น */
+body.density-table .order-item .item-price {
+  font-weight: 700; color: var(--primary-dark); font-size: 14px;
+}
+
+/* พื้นที่รายการสูงขึ้น (เห็นได้เยอะ) */
+body.density-table .order-items {
+  max-height: none;
+}
+
+/* กริดสินค้าซ้าย: การ์ดกะทัดรัดแบบ desktop */
+body.density-table .pcard {
+  border: 1px solid var(--border);
+  box-shadow: none;
+}
+body.density-table .pcard:hover {
+  border-color: var(--primary);
+  box-shadow: 0 2px 6px rgba(233,30,140,0.15);
+  transform: none;
+}
+
+/* ปุ่มชำระเงินให้เด่นแบบรูป (เขียวใหญ่) */
+body.density-table .pay-actions .pay-btn,
+body.density-table .checkout-buttons .pay-btn {
+  font-size: 15px; padding: 14px;
+}
+
+/* แถบสรุปด้านล่าง (ยอดรวม/ส่วนลด/สุทธิ) จัดเป็นตารางเล็ก */
+body.density-table .order-summary-row {
+  font-size: 13px; padding: 3px 0;
+}
+
+/* ===== หน้าจอกว้าง: ให้ตารางใช้พื้นที่เต็มที่ ===== */
+@media (min-width: 1200px) {
+  body.density-table .order-table-head,
+  body.density-table .order-item {
+    grid-template-columns: 36px 1fr 110px 80px 90px 32px;
+  }
+}
+
+/* ===== มือถือ: โหมดตารางยุบเป็นแบบกะทัดรัดแทน (ตารางแคบไปบนจอเล็ก) ===== */
+@media (max-width: 700px) {
+  body.density-table .order-table-head { display: none !important; }
+  body.density-table .order-item {
+    display: flex !important;
+    grid-template-columns: none;
+  }
+  body.density-table .left { flex: 1 1 auto; }
+  body.density-table .products {
+    grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+  }
+}
+</style>
+
+
+<!-- ============ POS v3.0 — Rango-style Desktop POS layout ============ -->
+<style id="posV3RangoStyles">
+/* โหมด Rango: ทำงานร่วมกับ density-table */
+body.density-table #rangoBigTotal { display: block; }
+
+/* ยอดเงินใหญ่: sticky อยู่บนสุดของ order panel */
+#rangoBigTotal { position: sticky; top: 0; z-index: 6; }
+
+/* ปุ่มชำระเงินในโหมด Rango: สด + QR ใหญ่ชัด */
+body.density-table .pay-btn.pay-cash {
+  background: linear-gradient(135deg,#2e7d32,#43a047) !important; color:#fff;
+  font-size: 15px; font-weight: 700;
+}
+body.density-table .pay-btn.pay-qr {
+  background: linear-gradient(135deg,#1565c0,#42a5f5) !important; color:#fff;
+  font-size: 15px; font-weight: 700;
+}
+
+/* order panel กว้างขึ้นในโหมด desktop (ตารางเด่น) */
+@media (min-width: 1100px) {
+  body.density-table .right { width: clamp(480px, 46%, 820px); }
+}
+
+/* ตารางรายการ: เส้นขอบชัด อ่านง่ายแบบ desktop POS */
+body.density-table .order-item {
+  border-bottom: 1px solid #eee !important;
+}
+body.density-table .order-table-head {
+  background: #d32f6f;
+  color: #fff;
+}
+
+/* ช่องค้นหา/ยิงบาร์โค้ดเด่นขึ้น (เหมือนช่องกลางบนในรูป) */
+body.density-table .search-bar input {
+  font-size: 15px; padding: 10px 14px;
+  border: 2px solid var(--primary);
+}
+
+/* คงเหลือ (stock) แสดงในตาราง */
+body.density-table .order-item .otc-stock {
+  font-size: 11px; color: var(--text-muted); text-align: center;
+}
+
+/* summary ให้กระชับ อยู่เหนือปุ่มจ่าย */
+body.density-table .summary {
+  padding: 8px 12px; font-size: 13px;
+}
+body.density-table .summary .total {
+  font-size: 15px; font-weight: 700;
+}
+
+/* ปุ่มฟังก์ชันล่าง (ล้าง/พัก) แบบ desktop */
+body.density-table .order-top h3 { font-size: 15px; }
+</style>
+
+
+<!-- ============ POS v3.0 — PART 15: ปรับ UI ตามที่ผู้ใช้ต้องการ ============ -->
+<style id="posV3Part15">
+/* ========== 1. เปลี่ยนธีมหลักเป็นสีฟ้า (override ตัวแปรพื้นฐาน) ========== */
+:root {
+  --primary: #1565c0 !important;
+  --primary-light: #5e92f3 !important;
+  --primary-dark: #003c8f !important;
+  --primary-pale: #e3f2fd !important;
+  --accent: #42a5f5 !important;
+  --bg: #f5f9ff !important;
+  --border: #bbdefb !important;
+  --text-muted: #5c7a99 !important;
+  --shadow: 0 2px 12px rgba(21,101,192,0.12) !important;
+}
+
+/* ========== 2. ซ่อนแถบมุมมอง (densityBar) ========== */
+#densityBar { display: none !important; }
+
+/* ========== 3. ปุ่ม TopBar เป็นสี่เหลี่ยมจัตุรัส ใหญ่ขึ้น กระชับ ========== */
+.tb-btn {
+  border-radius: 10px !important;
+  padding: 8px 12px !important;
+  font-size: 12px !important;
+  font-weight: 600;
+  min-width: 62px;
+  min-height: 46px;
+  display: inline-flex !important;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  line-height: 1.15;
+  border: 1px solid rgba(255,255,255,0.35) !important;
+  background: rgba(255,255,255,0.18) !important;
+}
+.tb-btn:hover { background: rgba(255,255,255,0.3) !important; }
+.topbar-right { gap: 6px !important; }
+
+/* ========== 4. รายการสินค้าในออเดอร์ แคบลง + กระชับ ========== */
+/* ลดความกว้าง order panel */
+.right { width: clamp(380px, 48%, 720px) !important; }
+
+/* รายการกระชับ: ลด padding, ขนาดอีโมจิ, ระยะห่าง */
+.order-item {
+  padding: 6px 0 !important;
+  gap: 7px !important;
+  align-items: center !important;
+}
+.item-emoji { font-size: 17px !important; margin-top: 0 !important; }
+.item-name { font-size: 12.5px !important; line-height: 1.25 !important; }
+.item-unit { font-size: 10.5px !important; }
+.item-note-btn { font-size: 10px !important; padding: 1px 4px !important; }
+.qty-btn { width: 24px !important; height: 24px !important; font-size: 14px !important; }
+.qty-num { font-size: 12.5px !important; min-width: 22px !important; }
+.item-price { font-size: 13px !important; }
+.order-items { gap: 1px !important; }
+
+/* หัวออเดอร์กระชับ */
+.order-top { padding: 10px 12px !important; }
+.order-top h3 { font-size: 14px !important; }
+.customer-bar { padding: 6px 12px !important; }
+
+/* ========== 6. เปลี่ยน gradient ชมพู hardcoded → ฟ้า ทั้งหมด ========== */
+.topbar {
+  background: linear-gradient(135deg, #1565c0 0%, #42a5f5 100%) !important;
+  box-shadow: 0 2px 12px rgba(21,101,192,0.3) !important;
+}
+.modal-header,
+.pp-section-header,
+.stock-table th,
+.prod-table th,
+.import-preview-table th {
+  background: linear-gradient(135deg, #1565c0 0%, #42a5f5 100%) !important;
+}
+.pay-qr { background: linear-gradient(135deg, #1565c0, #42a5f5) !important; }
+.pay-qr:hover { background: linear-gradient(135deg, #003c8f, #1565c0) !important; }
+.pp-save-btn { background: linear-gradient(135deg, #1565c0, #42a5f5) !important; }
+/* ปุ่มหลักต่างๆที่ใช้สีชมพู */
+.btn-save, .barcode-gen-btn, .promo-apply-title {
+  background: linear-gradient(135deg, #1565c0, #42a5f5) !important;
+}
+/* logo/brand accent */
+.brand-logo { background: linear-gradient(135deg, #1565c0, #42a5f5) !important; }
+
+</style>
 
 </body>
 </html>
