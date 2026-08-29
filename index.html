@@ -10931,6 +10931,167 @@ if(typeof window.ensureBigTotalDisplay==='function'){
 })();
 
 
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 19: แก้ระบบ Import ไฟล์ใหญ่ (6000+ รายการ)
+// ============================================================
+// ปัญหาเดิม: import ไฟล์ใหญ่ได้ไม่ครบ (บาร์โค้ดว่างถูกมองว่าซ้ำ, preview ค้าง)
+
+// override parseImportRows ให้ทนทานขึ้น + วิเคราะห์สาเหตุชัด
+window.parseImportRows = function(rows){
+  if(!rows || !rows.length){ showToast('ไฟล์ว่างเปล่า'); return; }
+  var header = rows[0].map(function(c){ return String(c).trim(); });
+  var dataRows = rows.slice(1);
+
+  function findCol(keywords){
+    for(var i=0;i<header.length;i++){
+      var h = header[i].toLowerCase();
+      for(var k=0;k<keywords.length;k++){ if(h.indexOf(keywords[k])!==-1) return i; }
+    }
+    return -1;
+  }
+  var cName = findCol(['ชื่อ','name','สินค้า','รายการ']);
+  var cPrice = findCol(['ราคาขาย','ราคา','price','ขาย']);
+  var cCost = findCol(['ต้นทุน','cost','ทุน']);
+  var cCat = findCol(['หมวด','category','cat','ประเภท','กลุ่ม']);
+  var cStock = findCol(['สต๊อก','สต็อก','stock','คงเหลือ','จำนวน','คลัง']);
+  var cBarcode = findCol(['บาร์โค้ด','บาร์โค๊ด','barcode','รหัสสินค้า','รหัส','sku']);
+
+  if(cName<0){ cName=0; if(cPrice<0)cPrice=1; if(cCost<0)cCost=2; if(cCat<0)cCat=3; if(cStock<0)cStock=4; if(cBarcode<0)cBarcode=5; }
+
+  // นับบาร์โค้ดซ้ำในไฟล์เอง (เพื่อ merge)
+  var barcodeSeen = {};
+
+  importParsedRows = dataRows.map(function(r, idx){
+    var name = String((r[cName]!==undefined && r[cName]!==null) ? r[cName] : '').trim();
+    var priceRaw = (r[cPrice]!==undefined && r[cPrice]!==null) ? String(r[cPrice]).replace(/[^0-9.\-]/g,'') : '';
+    var price = parseFloat(priceRaw)||0;
+    var cost = cCost>=0 ? (parseFloat(String(r[cCost]).replace(/[^0-9.\-]/g,''))||0) : 0;
+    var cat = cCat>=0 ? String((r[cCat]!==undefined&&r[cCat]!==null)?r[cCat]:'').trim() : '';
+    var stock = cStock>=0 ? (parseInt(String(r[cStock]).replace(/[^0-9\-]/g,''))||0) : 0;
+    var barcode = cBarcode>=0 ? String((r[cBarcode]!==undefined&&r[cBarcode]!==null)?r[cBarcode]:'').trim() : '';
+    // แปลงบาร์โค้ดไทยมั่ว (ถ้ามี)
+    if(barcode && typeof convertThaiBarcodeToDigits==='function') barcode = convertThaiBarcodeToDigits(barcode);
+
+    var err = '';
+    if(!name){ err='ไม่มีชื่อ'; }
+    else if(price<=0){ err='ราคาเป็น 0'; }
+
+    if(!cat) cat = 'ทั่วไป';
+
+    return { name:name, price:price, cost:cost, cat:cat, stock:stock, barcode:barcode, err:err, _row:idx+2 };
+  }).filter(function(r){
+    // เก็บเฉพาะแถวที่มีอย่างน้อยชื่อหรือราคา (ตัดแถวว่างเปล่าจริงๆ)
+    return r.name || r.price>0 || r.barcode;
+  });
+
+  renderImportPreview();
+};
+
+// override renderImportPreview: แสดงแค่ 80 แถวแรก (กันค้าง) + สรุปสาเหตุ
+window.renderImportPreview = function(){
+  var validRows = importParsedRows.filter(function(r){ return !r.err; });
+  var errRows = importParsedRows.filter(function(r){ return r.err; });
+
+  document.getElementById('importCount').textContent = importParsedRows.length;
+  document.getElementById('importValidCount').textContent = validRows.length;
+
+  // สรุปสาเหตุที่มีปัญหา
+  var errReasons = {};
+  errRows.forEach(function(r){ errReasons[r.err]=(errReasons[r.err]||0)+1; });
+  var errText = '';
+  Object.keys(errReasons).forEach(function(k){ errText += (errText?' · ':'')+k+': '+errReasons[k]; });
+
+  var errEl = document.getElementById('importErrCount');
+  errEl.textContent = errRows.length ? ('⚠️ ตัดออก '+errRows.length+' ('+errText+')') : '✓ ผ่านทั้งหมด';
+  errEl.style.color = errRows.length ? 'var(--danger)':'#2e7d32';
+
+  // preview แค่ 80 แถวแรก
+  var previewRows = importParsedRows.slice(0, 80);
+  document.getElementById('importPreviewBody').innerHTML = previewRows.map(function(r,i){
+    return '<tr'+(r.err?' class="err"':'')+'>'
+      +'<td>'+(i+1)+'</td>'
+      +'<td>'+(r.name||'<span style="color:#ccc">—</span>')+'</td>'
+      +'<td>'+r.price+'</td>'
+      +'<td>'+(r.cost||'—')+'</td>'
+      +'<td>'+r.cat+'</td>'
+      +'<td>'+r.stock+'</td>'
+      +'<td style="font-family:monospace;font-size:10px">'+(r.barcode||'—')+'</td>'
+      +'<td>'+(r.err?'<span style="color:var(--danger)">'+r.err+'</span>':'<span style="color:#2e7d32">✓</span>')+'</td>'
+      +'</tr>';
+  }).join('') + (importParsedRows.length>80 ? '<tr><td colspan="8" style="text-align:center;padding:8px;color:var(--text-muted);font-size:11px">... แสดง 80 แถวแรกจาก '+importParsedRows.length+' แถว (import ครบทุกแถวเมื่อกดยืนยัน)</td></tr>' : '');
+
+  document.getElementById('importPreviewWrap').style.display = 'block';
+};
+
+// override confirmImport: บาร์โค้ดว่างไม่ถือว่าซ้ำ + รายงานละเอียด
+window.confirmImport = function(){
+  var validRows = importParsedRows.filter(function(r){ return !r.err; });
+  if(!validRows.length){ showToast('ไม่มีข้อมูลที่ถูกต้องให้นำเข้า'); return; }
+  var updateExisting = document.getElementById('importUpdateExisting').checked;
+
+  showConfirm('ยืนยันนำเข้าสินค้า', 'จะนำเข้า '+validRows.length+' รายการ'+(updateExisting?'\n(อัปเดตสินค้าเดิมถ้าบาร์โค้ดตรง)':''), '📊', 'นำเข้า', '').then(function(ok){
+    if(!ok) return;
+
+    // สร้าง index บาร์โค้ดที่มีอยู่ (เร็วกว่า find ทุกครั้ง)
+    var barcodeIndex = {};
+    PRODUCTS.forEach(function(p){ if(p.barcode) barcodeIndex[p.barcode]=p; });
+
+    var added=0, updated=0, newCats=0, skippedDup=0;
+    var newCatSet = {};
+
+    validRows.forEach(function(r){
+      // สร้างหมวดใหม่ถ้ายังไม่มี
+      if(r.cat && !CATEGORIES.find(function(c){return c.name===r.cat;}) && !newCatSet[r.cat]){
+        CATEGORIES.push({ name:r.cat, emoji:'🏷️' });
+        newCatSet[r.cat]=true;
+        newCats++;
+      }
+
+      // บาร์โค้ดว่าง = เพิ่มใหม่เสมอ (ไม่ถือว่าซ้ำ)
+      var existing = (r.barcode && barcodeIndex[r.barcode]) ? barcodeIndex[r.barcode] : null;
+
+      if(existing && updateExisting){
+        existing.name=r.name; existing.price=r.price; existing.cost=r.cost;
+        existing.cat=r.cat; existing.stock=r.stock; existing.priceRetail=r.price;
+        updated++;
+      } else if(existing && !updateExisting){
+        skippedDup++; // ซ้ำและไม่อัปเดต → ข้าม
+      } else {
+        var newProd = {
+          id: nextId++, name:r.name, price:r.price, emoji:'📦', cat:r.cat,
+          stock:r.stock, barcode:r.barcode, cost:r.cost,
+          priceRetail:r.price, priceWholesale:r.price, priceVip:r.price, visible:true
+        };
+        PRODUCTS.push(newProd);
+        if(r.barcode) barcodeIndex[r.barcode]=newProd; // อัปเดต index
+        added++;
+      }
+    });
+
+    saveProducts(); saveStock(); if(typeof saveCategories==='function') saveCategories();
+    renderProducts(); renderCategories();
+    if(typeof renderProdTable==='function') renderProdTable();
+    if(typeof checkStockAlert==='function') checkStockAlert();
+    closeModal('importModal');
+
+    var msg = '✅ นำเข้าสำเร็จ: เพิ่ม '+added+' รายการ';
+    if(updated>0) msg += ', อัปเดต '+updated;
+    if(skippedDup>0) msg += ', ข้าม(ซ้ำ) '+skippedDup;
+    if(newCats>0) msg += ', หมวดใหม่ '+newCats;
+    showToast(msg);
+
+    // ถ้ามีการข้ามเพราะซ้ำเยอะ เตือน
+    if(skippedDup > 10){
+      setTimeout(function(){
+        showToast('💡 มี '+skippedDup+' รายการบาร์โค้ดซ้ำถูกข้าม — ติ๊ก "อัปเดตสินค้าเดิม" ถ้าต้องการเขียนทับ');
+      }, 2000);
+    }
+  });
+};
+
+
 </script>
 
 
