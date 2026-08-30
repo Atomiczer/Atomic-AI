@@ -10508,6 +10508,7 @@ window.PRINT_AUTOCLOSE_SCRIPT = ''
 // (patch ผ่านการ intercept window.open + document.write)
 (function patchPrintWindows(){
   var _origOpen = window.open;
+  window._nativeWindowOpen = window.open;  // เก็บตัวแท้ไว้คืนภายหลัง
   window.open = function(url, name, features){
     var win = _origOpen.call(window, url, name, features);
     if(win && (!url || url==='' || url==='about:blank')){
@@ -11779,19 +11780,7 @@ document.addEventListener('keydown', function(e){
 // ============ 5. แก้หน้าพิมพ์ใบเสร็จหาย ============
 // ต้นตอ: patchPrintWindows override window.open+document.write ทำให้หน้าพิมพ์พัง
 // แก้: คืน window.open เดิม (ยกเลิก patch) + ให้ printReceipt ทำงานตรงๆ
-(function restoreWindowOpen(){
-  // ถ้ามี _origWindowOpen เก็บไว้ ให้คืน
-  // patchPrintWindows ไม่ได้เก็บ original ไว้ → เราสร้าง window.open ใหม่ที่ไม่ patch อะไร
-  // แต่ต้องระวังไม่ให้ recursive — ใช้ native
-  try {
-    var iframe = document.createElement('iframe');
-    iframe.style.display='none';
-    document.body.appendChild(iframe);
-    var nativeOpen = iframe.contentWindow.open;
-    document.body.removeChild(iframe);
-    if(nativeOpen){ window.open = nativeOpen.bind(window); }
-  } catch(e){}
-})();
+// [ลบแล้ว] restoreWindowOpen ที่พัง (คืน window.open จาก iframe ที่ลบแล้ว) — ดู Part 27 แทน
 
 // ปิด observer เก่าซ้ำอีกรอบ (เผื่อสร้างหลัง Part 25)
 setTimeout(function(){
@@ -11933,6 +11922,24 @@ function openPinnedManager(){
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
   else run();
   setTimeout(run, 600);
+})();
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 27: แก้หน้าพิมพ์ไม่เด้ง (คืน window.open แท้)
+// ============================================================
+// ปัญหา: window.open ถูก override หลายชั้น (Part 12 patch + Part 25 คืนจาก iframe ที่ลบแล้ว)
+//        ทำให้ printReceipt เปิดหน้าต่างพิมพ์ไม่ได้
+// แก้: คืน window.open เป็นตัวแท้ของเบราว์เซอร์ (ไม่ patch อะไรเลย)
+//      การปิดอัตโนมัติปล่อยให้ onafterprint ใน HTML หน้าพิมพ์ทำงานเอง (มีอยู่แล้ว)
+
+(function fixWindowOpen(){
+  if(window._nativeWindowOpen && typeof window._nativeWindowOpen==='function'){
+    window.open = window._nativeWindowOpen;
+    console.log('[POS] คืน window.open แท้แล้ว — หน้าพิมพ์เปิดได้ปกติ');
+  }
 })();
 
 
