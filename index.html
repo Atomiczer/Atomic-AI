@@ -11533,8 +11533,294 @@ function applyNoEmoji(){
       if(need){ clearTimeout(window._noEmojiTimer); window._noEmojiTimer=setTimeout(applyNoEmoji, 100); }
     });
     mo.observe(document.body, { childList:true, subtree:true });
+    window._noEmojiObserver = mo;
   } catch(e){}
 })();
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 23: แก้ chunking ให้ถูกต้อง (bytes + reliable)
+// ============================================================
+// ปัญหาเดิม: CHUNK_SIZE วัดเป็นตัวอักษร แต่ไทย 1 ตัว = 3 bytes → chunk เกิน 1MB
+// + batch write ล้มเงียบ → ดึงมาได้ไม่ครบ
+
+// ขนาด chunk ปลอดภัย: 200,000 ตัวอักษร (~600KB สำหรับไทย, ต่ำกว่า 1MB แน่นอน)
+var SAFE_CHUNK_CHARS = 200000;
+
+// เขียนขึ้น cloud แบบ chunk ที่เชื่อถือได้
+async function pushToCloudSafe(key, value){
+  if(!fbReady || !isCloudSyncEnabled()) return;
+  if(fbApplyingRemote) return;
+
+  var strVal = String(value);
+  var device = getDeviceId();
+  var dataCol = fbDb.collection('shops').doc(SHOP_ID).collection('data');
+  var chunkCol = dataCol.doc(key).collection('chunks');
+
+  // เล็ก → document เดียว
+  if(strVal.length <= SAFE_CHUNK_CHARS){
+    // ลบ chunk เก่า (ถ้าเคยมี) ก่อน
+    try {
+      var oldSnap = await chunkCol.get();
+      if(!oldSnap.empty){
+        var delBatch = fbDb.batch();
+        oldSnap.forEach(function(d){ delBatch.delete(d.ref); });
+        await delBatch.commit();
+      }
+    } catch(e){}
+    return dataCol.doc(key).set({
+      value: strVal, updatedAt: Date.now(), device: device, chunked: false
+    });
+  }
+
+  // ใหญ่ → แบ่งก้อน
+  var chunks = [];
+  for(var i=0; i<strVal.length; i+=SAFE_CHUNK_CHARS){
+    chunks.push(strVal.slice(i, i+SAFE_CHUNK_CHARS));
+  }
+
+  // 1. ลบ chunk เก่าทั้งหมดก่อน (กันข้อมูลปน)
+  try {
+    var oldSnap2 = await chunkCol.get();
+    if(!oldSnap2.empty){
+      var delBatch2 = fbDb.batch();
+      oldSnap2.forEach(function(d){ delBatch2.delete(d.ref); });
+      await delBatch2.commit();
+    }
+  } catch(e){ console.warn('clear old chunks', e.message); }
+
+  // 2. เขียน chunk ทีละก้อน (ไม่ใช้ batch เดียว - ปลอดภัยกว่าสำหรับข้อมูลใหญ่)
+  for(var c=0; c<chunks.length; c++){
+    await chunkCol.doc('c'+c).set({ data: chunks[c], idx: c });
+  }
+
+  // 3. เขียน meta doc สุดท้าย (บอกว่าพร้อมแล้ว กี่ก้อน)
+  return dataCol.doc(key).set({
+    chunked: true, chunkCount: chunks.length,
+    updatedAt: Date.now(), device: device
+  });
+}
+
+// อ่านจาก cloud แบบ chunk ที่เชื่อถือได้ (เรียงลำดับถูกต้อง)
+async function fetchFromCloudSafe(key){
+  var dataCol = fbDb.collection('shops').doc(SHOP_ID).collection('data');
+  var doc = await dataCol.doc(key).get();
+  if(!doc.exists) return null;
+  var data = doc.data();
+  if(!data) return null;
+
+  if(!data.chunked){
+    return { value: data.value, updatedAt: data.updatedAt, device: data.device };
+  }
+
+  // ดึง chunk ทั้งหมด เรียงตาม idx
+  var chunkCol = dataCol.doc(key).collection('chunks');
+  var snap = await chunkCol.get();
+  var parts = new Array(data.chunkCount||0);
+  var got = 0;
+  snap.forEach(function(d){
+    var cd = d.data();
+    if(cd && typeof cd.idx==='number'){ parts[cd.idx]=cd.data; got++; }
+  });
+
+  // ตรวจว่าได้ครบทุกก้อนไหม
+  var expected = data.chunkCount||got;
+  if(got < expected){
+    console.warn('chunk ไม่ครบ:', key, got+'/'+expected);
+    showToast('⚠️ ดึงข้อมูล '+key+' ไม่ครบ ('+got+'/'+expected+' ก้อน) ลองใหม่');
+    return null;
+  }
+
+  // เช็คว่าไม่มีก้อนว่าง
+  for(var i=0;i<expected;i++){
+    if(parts[i]===undefined){ console.warn('chunk หาย idx',i); return null; }
+  }
+
+  return { value: parts.join(''), updatedAt: data.updatedAt, device: data.device };
+}
+
+// override ฟังก์ชันเดิมให้ใช้ตัวใหม่
+window.pushToCloud = function(key, value){
+  if(!fbReady || !isCloudSyncEnabled()) return;
+  if(fbApplyingRemote) return;
+  clearTimeout(fbWriteTimers[key]);
+  fbWriteTimers[key] = setTimeout(function(){
+    pushToCloudSafe(key, value).catch(function(err){
+      console.warn('sync push error', key, err && err.message);
+    });
+  }, 500);
+};
+
+window.fetchFromCloudChunked = fetchFromCloudSafe; // ใช้ตัวใหม่
+
+window.uploadAllToCloud = async function(){
+  if(!fbReady){ var ok = await initFirebase(); if(!ok) return 0; }
+  var count = 0;
+  for(var i=0;i<SYNC_KEYS.length;i++){
+    var key = SYNC_KEYS[i];
+    var val = localStorage.getItem(key);
+    if(val !== null){
+      try {
+        await pushToCloudSafe(key, val);
+        count++;
+      } catch(e){
+        console.warn('upload error', key, e.message);
+        showToast('⚠️ อัปโหลด '+key+' ไม่สำเร็จ');
+      }
+    }
+  }
+  return count;
+};
+
+window.downloadAllFromCloud = async function(){
+  if(!fbReady){ var ok = await initFirebase(); if(!ok) return 0; }
+  var count = 0;
+  for(var i=0;i<SYNC_KEYS.length;i++){
+    var key = SYNC_KEYS[i];
+    try {
+      var result = await fetchFromCloudSafe(key);
+      if(result && result.value!==undefined && result.value!==null){
+        fbApplyingRemote = true;
+        _origSetItem(key, result.value);
+        fbApplyingRemote = false;
+        count++;
+      }
+    } catch(e){ console.warn('download error', key, e.message); }
+  }
+  if(count>0){ reloadEverything(); }
+  return count;
+};
+
+window.subscribeCloud = function(){
+  fbUnsubscribers.forEach(function(u){ try{u();}catch(e){} });
+  fbUnsubscribers = [];
+  SYNC_KEYS.forEach(function(key){
+    var unsub = fbDocRef(key).onSnapshot(function(doc){
+      if(!doc.exists) return;
+      var data = doc.data();
+      if(!data) return;
+      if(data.device === getDeviceId()) return;
+      fetchFromCloudSafe(key).then(function(result){
+        if(!result || result.value===undefined || result.value===null) return;
+        fbApplyingRemote = true;
+        try { _origSetItem.call(localStorage, key, result.value); } catch(e){}
+        fbApplyingRemote = false;
+        reloadDataFromLocal(key);
+      });
+    }, function(err){ console.warn('subscribe error', key, err.message); });
+    fbUnsubscribers.push(unsub);
+  });
+};
+
+// restart subscription ให้ใช้ตัวใหม่
+setTimeout(function(){
+  if(typeof isCloudSyncEnabled==='function' && isCloudSyncEnabled() && fbReady){
+    subscribeCloud();
+  }
+}, 1800);
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 25: แก้ประสิทธิภาพ + บาร์โค้ดเด้งชำระ + พิมพ์หาย
+// ============================================================
+
+// ============ 1. ปิด MutationObserver ที่ทำให้ช้า ============
+// ตัวเดิม (Part 22) วิ่งเอา emoji ทั้ง document ทุกครั้งที่ DOM เปลี่ยน → ช้ามากกับสินค้า 6000
+(function killSlowObserver(){
+  if(window._noEmojiObserver){ try{ window._noEmojiObserver.disconnect(); }catch(e){} }
+  // แทน applyNoEmoji ด้วยเวอร์ชันเบา (เฉพาะปุ่ม ไม่วิ่งทั้ง text node)
+  window.applyNoEmoji = function(){
+    if(typeof fixEmptyButtons==='function') fixEmptyButtons();
+  };
+})();
+
+// ============ 2. เอา emoji ออกด้วย CSS แทน (เบากว่ามาก) ============
+(function cssEmojiHide(){
+  if(document.getElementById('noEmojiStyles2')) return;
+  var style = document.createElement('style');
+  style.id = 'noEmojiStyles2';
+  style.textContent = '.pemoji,.item-emoji{display:none!important;}';
+  document.head.appendChild(style);
+})();
+
+// ============ 3. แก้บาร์โค้ดยิงแล้วเด้งหน้าชำระเงิน ============
+// ต้นตอ: handleSearchKeydown เดิม blur() ออกจากช่องค้นหา → Enter ที่ตามมาไปโดนตัวเปิดชำระเงิน
+var _barcodeJustScanned = 0;
+
+// override handleSearchKeydown ให้ไม่ blur + ตั้ง flag กัน Enter เด้ง
+window.handleSearchKeydown = function(e){
+  if(e.key==='Enter'){
+    var val = e.target.value.trim();
+    // แปลงบาร์โค้ดไทยมั่ว (ถ้ามี)
+    if(typeof convertThaiBarcodeToDigits==='function'){
+      var conv = convertThaiBarcodeToDigits(val);
+      if(conv!==val && /^[0-9]+$/.test(conv)){ e.target.value=conv; val=conv; }
+    }
+    if(val.length>=4){
+      var found = PRODUCTS.find(function(p){return p.barcode===val;});
+      if(found){
+        addToOrder(found.id);
+        showToast('เพิ่ม '+found.name);
+        e.target.value='';
+        // ไม่ blur! ให้ cursor อยู่ในช่องค้นหาต่อ (ยิงตัวถัดไปได้เลย)
+        _barcodeJustScanned = Date.now(); // ตั้ง flag กัน Enter เด้งชำระเงิน
+        renderProducts();
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      } else {
+        // ไม่เจอบาร์โค้ด — ค้นหาชื่อแทน (ไม่เด้งชำระเงิน)
+        _barcodeJustScanned = Date.now();
+        showToast('ไม่พบบาร์โค้ด: '+val);
+        e.preventDefault();
+        return;
+      }
+    }
+  }
+};
+
+// ============ 4. ทำให้ Enter เปิดชำระเงิน "เฉพาะเมื่อไม่ได้อยู่ในช่องค้นหา" ============
+// ปิด handler เก่าที่เด้งชำระเงินจากช่องค้นหา — ดักที่ capture phase ก่อนตัวอื่น
+document.addEventListener('keydown', function(e){
+  if(e.key!=='Enter') return;
+  var active = document.activeElement;
+  // ถ้าอยู่ในช่องค้นหา = ห้ามเปิดชำระเงินเด็ดขาด (ให้ handleSearchKeydown จัดการ)
+  if(active && active.id==='searchInput'){
+    return; // handleSearchKeydown ทำงานเอง
+  }
+  // ถ้าเพิ่งยิงบาร์โค้ดไม่เกิน 500ms = กัน Enter ที่ติดมา
+  if(Date.now() - _barcodeJustScanned < 500){
+    e.stopPropagation();
+    return;
+  }
+}, true); // capture phase - ทำงานก่อน handler อื่น
+
+// ============ 5. แก้หน้าพิมพ์ใบเสร็จหาย ============
+// ต้นตอ: patchPrintWindows override window.open+document.write ทำให้หน้าพิมพ์พัง
+// แก้: คืน window.open เดิม (ยกเลิก patch) + ให้ printReceipt ทำงานตรงๆ
+(function restoreWindowOpen(){
+  // ถ้ามี _origWindowOpen เก็บไว้ ให้คืน
+  // patchPrintWindows ไม่ได้เก็บ original ไว้ → เราสร้าง window.open ใหม่ที่ไม่ patch อะไร
+  // แต่ต้องระวังไม่ให้ recursive — ใช้ native
+  try {
+    var iframe = document.createElement('iframe');
+    iframe.style.display='none';
+    document.body.appendChild(iframe);
+    var nativeOpen = iframe.contentWindow.open;
+    document.body.removeChild(iframe);
+    if(nativeOpen){ window.open = nativeOpen.bind(window); }
+  } catch(e){}
+})();
+
+// ปิด observer เก่าซ้ำอีกรอบ (เผื่อสร้างหลัง Part 25)
+setTimeout(function(){
+  // หา observer ที่ยัง active แล้วปิด — ทำผ่านการ override MutationObserver ชั่วคราวไม่ได้
+  // แต่เราแทน applyNoEmoji เป็นเบาแล้ว จึงไม่หนักแม้ observer ยังวิ่ง
+}, 100);
 
 
 </script>
