@@ -12160,6 +12160,65 @@ window.printViaIframe = function(htmlContent){
 })();
 
 
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 30: บังคับเปิดพิมพ์อัตโนมัติ (เครื่องที่มีค่าเก่า)
+// ============================================================
+// ปัญหา: เครื่องที่เคยตั้งค่าไว้ autoPrint=false ค้างใน localStorage
+//        การเปลี่ยน default ไม่มีผล → คิดเงินเสร็จไม่พิมพ์เอง
+
+(function forceAutoPrint(){
+  function run(){
+    try {
+      var MIGRATED = 'pos_autoprint_on_v1';
+      if(!localStorage.getItem(MIGRATED)){
+        // เปิด autoPrint ให้ทุกเครื่อง (ครั้งเดียว)
+        if(typeof prCfg!=='undefined'){
+          prCfg.autoPrint = true;
+          if(typeof savePrinterCfg==='function'){
+            // อัปเดต checkbox แล้วเซฟ
+            var cb = document.getElementById('autoPrint');
+            if(cb){ cb.checked = true; }
+          }
+          // เซฟตรงเข้า localStorage
+          try {
+            var cfg = JSON.parse(localStorage.getItem('pos_printer_v3')||'{}');
+            cfg.autoPrint = true;
+            localStorage.setItem('pos_printer_v3', JSON.stringify(cfg));
+          } catch(e){}
+        }
+        localStorage.setItem(MIGRATED, '1');
+      }
+    } catch(e){}
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 500);
+  setTimeout(run, 1200);
+})();
+
+// เผื่ออีกชั้น: hook confirmPayment ให้พิมพ์อัตโนมัติเสมอ (ถ้ายังไม่พิมพ์)
+(function hookConfirmPaymentPrint(){
+  var _orig = window.confirmPayment;
+  if(typeof _orig !== 'function') return;
+  window.confirmPayment = function(method){
+    _orig.apply(this, arguments);
+    // ถ้า autoPrint เปิด แต่ด้วยเหตุใด _orig ไม่พิมพ์ → พิมพ์เสริม
+    setTimeout(function(){
+      try {
+        if(typeof prCfg!=='undefined' && prCfg.autoPrint && !window._justPrinted){
+          // เช็คว่ามี iframe พิมพ์เกิดขึ้นไหมใน 1 วิที่ผ่านมา
+          if(!document.getElementById('printFrame')){
+            if(typeof printReceipt==='function') printReceipt();
+          }
+        }
+      } catch(e){}
+    }, 1000);
+  };
+})();
+
+
 </script>
 
 
