@@ -3547,9 +3547,8 @@ function printReceipt() {
     +'<script>window.onload=function(){setTimeout(function(){window.print();},800);};window.onafterprint=function(){window.close();};<\/script>'
     +'</body></html>';
 
-  var win = window.open('','_blank','width=420,height:750,left=200,top=80');
-  if(win){ win.document.write(html); win.document.close(); }
-  else showToast('⚠️ กรุณาอนุญาต Popup เพื่อพิมพ์ใบเสร็จ');
+  if(typeof printViaIframe==='function'){ printViaIframe(html); }
+  else { var win=window.open('','_blank','width=420,height=750'); if(win){win.document.write(html);win.document.close();} }
 }
 
 // ======================== PRINTER ========================
@@ -4265,9 +4264,8 @@ function printReceiptA4() {
     +'<script>setTimeout(function(){window.print();},800);window.onafterprint=function(){window.close();};<\/script>'
     +'</body></html>';
 
-  var win = window.open('','_blank','width=900,height=750,left=100,top=50');
-  if(win){ win.document.write(html); win.document.close(); }
-  else showToast('⚠️ กรุณาอนุญาต Popup เพื่อพิมพ์');
+  if(typeof printViaIframe==='function'){ printViaIframe(html); }
+  else { var win=window.open('','_blank','width=900,height=750'); if(win){win.document.write(html);win.document.close();} }
 }
 
 function clearDailyReport(){
@@ -8451,9 +8449,8 @@ function printPriceLabels(){
     + '<script>window.onload=function(){document.querySelectorAll("svg.bc").forEach(function(el){try{JsBarcode(el,el.getAttribute("data-code"),{format:"CODE128",displayValue:false,margin:0,height:'+Math.round(cfg.barH*0.32)+'});}catch(e){}});setTimeout(function(){window.print();},700);window.onafterprint=function(){window.close();};};<\/script>'
     + '</body></html>';
 
-  var win = window.open('','_blank','width=900,height=700');
-  if(win){ win.document.write(html); win.document.close(); }
-  else showToast('⚠️ กรุณาอนุญาต Popup เพื่อพิมพ์');
+  if(typeof printViaIframe==='function'){ printViaIframe(html); }
+  else { var win=window.open('','_blank','width=900,height=700'); if(win){win.document.write(html);win.document.close();} }
 }
 
 
@@ -12090,57 +12087,10 @@ function printViaIframe(htmlContent){
 // ==================== 3. เปลี่ยน printReceipt ให้ใช้ iframe ====================
 // เก็บ printReceipt เดิมไว้ แล้ว intercept window.open ตอนเรียก printReceipt
 // วิธี: override printReceipt ให้ดัก window.open ชั่วคราว → ส่ง html เข้า iframe แทน
-(function patchPrintReceiptToIframe(){
-  var origPrintReceipt = window.printReceipt;
-  if(typeof origPrintReceipt !== 'function') return;
-
-  window.printReceipt = function(){
-    // ดัก window.open ชั่วคราว
-    var realOpen = window.open;
-    var captured = null;
-    window.open = function(){
-      // คืน fake window ที่เก็บ html
-      captured = {
-        document: {
-          _html: '',
-          write: function(h){ this._html += h; },
-          close: function(){}
-        },
-        focus:function(){}, print:function(){}, close:function(){}
-      };
-      return captured;
-    };
-
-    try {
-      origPrintReceipt.apply(this, arguments);
-    } catch(e){ console.warn('printReceipt error', e); }
-
-    // คืน window.open
-    window.open = realOpen;
-
-    // ถ้าจับ html ได้ → พิมพ์ผ่าน iframe
-    if(captured && captured.document._html){
-      printViaIframe(captured.document._html);
-    }
-  };
-})();
+// [ลบแล้ว] patchPrintReceiptToIframe — printReceipt เรียก printViaIframe ตรงๆแล้ว
 
 // เปลี่ยน printReceiptA4 ให้ใช้ iframe ด้วย
-(function patchPrintA4ToIframe(){
-  var origA4 = window.printReceiptA4;
-  if(typeof origA4 !== 'function') return;
-  window.printReceiptA4 = function(){
-    var realOpen = window.open;
-    var captured = null;
-    window.open = function(){
-      captured = { document:{ _html:'', write:function(h){this._html+=h;}, close:function(){} }, focus:function(){}, print:function(){}, close:function(){} };
-      return captured;
-    };
-    try { origA4.apply(this, arguments); } catch(e){}
-    window.open = realOpen;
-    if(captured && captured.document._html){ printViaIframe(captured.document._html); }
-  };
-})();
+// [ลบแล้ว] patchPrintA4ToIframe
 
 
 </script>
