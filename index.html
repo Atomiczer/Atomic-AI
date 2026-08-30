@@ -3264,12 +3264,12 @@ function cmDragEnd(){cmDragIdx=null;document.querySelectorAll('.cm-card').forEac
 function renderProdTable() {
   document.getElementById('pmCount').textContent=PRODUCTS.length;
   document.getElementById('prodTableBody').innerHTML=PRODUCTS.map(function(p){
-    return '<tr><td>'+p.emoji+' '+p.name+'</td><td>'+p.cat+'</td><td style="font-weight:600;color:var(--primary)">฿'+p.price+'</td><td>'+p.stock+'</td>'
-      +'<td class="barcode-cell">'+(p.barcode?'🔖 '+p.barcode:'<span style="color:#ccc">—</span>')+'</td>'
+    return '<tr><td>'+p.name+'</td><td>'+p.cat+'</td><td style="font-weight:600;color:var(--primary)">฿'+p.price+'</td><td>'+p.stock+'</td>'
+      +'<td class="barcode-cell">'+(p.barcode?p.barcode:'<span style="color:#ccc">—</span>')+'</td>'
       +'<td style="display:flex;gap:4px">'
-      +'<button class="btn-sm btn-edit" onclick="editProduct('+p.id+')">✏️</button>'
-      +'<button class="btn-sm" style="background:'+(p.visible!==false?'#e8f5e9':'#ffebee')+';color:'+(p.visible!==false?'#2e7d32':'#c62828')+'" onclick="toggleProductVisible('+p.id+')" title="'+(p.visible!==false?'ซ่อนจากหน้าขาย':'แสดงในหน้าขาย')+'">'+(p.visible!==false?'👁':'🙈')+'</button>'
-    +'<button class="btn-sm btn-del" onclick="deleteProduct('+p.id+')">🗑</button>'
+      +'<button class="btn-sm btn-edit" onclick="editProduct('+p.id+')" style="white-space:nowrap">แก้ไข</button>'
+      +'<button class="btn-sm" style="white-space:nowrap;background:'+(p.visible!==false?'#e8f5e9':'#ffebee')+';color:'+(p.visible!==false?'#2e7d32':'#c62828')+'" onclick="toggleProductVisible('+p.id+')" title="'+(p.visible!==false?'ซ่อนจากหน้าขาย':'แสดงในหน้าขาย')+'">'+(p.visible!==false?'แสดง':'ซ่อน')+'</button>'
+    +'<button class="btn-sm btn-del" onclick="deleteProduct('+p.id+')" style="white-space:nowrap">ลบ</button>'
   +'</td></tr>';
   }).join('');
 }
@@ -11417,7 +11417,7 @@ window.subscribeCloud = function(){
 // เอา emoji ตกแต่งออก (📦 🛒 💾 🏷 ฯลฯ)
 
 // สัญลักษณ์ที่ "เก็บไว้" (ทำหน้าที่ UI)
-var KEEP_SYMBOLS = ['✕','×','✓','✔','→','←','⚠','❌','✅','⭐','●','○','—'];
+var KEEP_SYMBOLS = ['✕','×','✓','✔','→','←','⚠','❌','✅','⭐','●','○','—','−','+','≡','☰','·'];
 
 // regex จับ emoji ตกแต่ง (ไม่รวมที่เก็บไว้)
 function stripDecorativeEmoji(text){
@@ -11477,7 +11477,31 @@ function removeProductEmojis(){
 })();
 
 // รันเอา emoji ออกหลัง render ทุกครั้ง
+// map emoji → ข้อความแทน (สำหรับปุ่มที่จะว่าง)
+var EMOJI_BTN_LABELS = {
+  '✏️':'แก้ไข','✏':'แก้ไข','🗑️':'ลบ','🗑':'ลบ','👁':'แสดง','🙈':'ซ่อน',
+  '🎲':'สุ่ม','🔄':'สลับ','📷':'สแกน','➕':'เพิ่ม','💾':'บันทึก'
+};
+
+function fixEmptyButtons(){
+  // ปุ่มที่ข้อความเป็น emoji ล้วน → เติมข้อความแทน (ก่อนเอา emoji ออก)
+  var btns = document.querySelectorAll('button');
+  btns.forEach(function(btn){
+    if(btn.children.length>0) return; // มี element ลูก ข้าม
+    var txt = btn.textContent.trim();
+    if(!txt) return;
+    // เช็คว่าเป็น emoji ล้วนไหม (ไม่มีตัวอักษร)
+    if(/[ก-๙a-zA-Z0-9]/.test(txt)) return; // มีตัวอักษรแล้ว ข้าม
+    // เก็บสัญลักษณ์ UI ไว้
+    if(KEEP_SYMBOLS.indexOf(txt)!==-1) return;
+    // เป็น emoji ล้วน → แทนด้วยข้อความ
+    var label = EMOJI_BTN_LABELS[txt];
+    if(label){ btn.textContent = label; btn.dataset.emojiReplaced='1'; }
+  });
+}
+
 function applyNoEmoji(){
+  fixEmptyButtons();
   removeEmojiFromDOM(document.body);
 }
 
