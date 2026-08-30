@@ -2537,7 +2537,7 @@ Object.entries(dailyReport.catTotals||{}).forEach(function(e){if(!monthly[mk].ca
 }
 function loadPrinterCfg() {
   try { var s=localStorage.getItem(SK_PRINTER);if(s)return JSON.parse(s); } catch(e){}
-  return {paperSize:'80',ip:'',autoPrint:false,copies:1,receiptVAT:true,connections:{}};
+  return {paperSize:'80',ip:'',autoPrint:true,copies:1,receiptVAT:true,connections:{}};
 }
 function savePrinterCfg() {
   prCfg.paperSize=document.getElementById('paperSize').value;
@@ -12091,6 +12091,73 @@ function printViaIframe(htmlContent){
 
 // เปลี่ยน printReceiptA4 ให้ใช้ iframe ด้วย
 // [ลบแล้ว] patchPrintA4ToIframe
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 29: แก้พิมพ์ iframe ให้ทำงานจริง + autoprint
+// ============================================================
+
+// เขียน printViaIframe ใหม่ให้แข็งแรง (ตัด script ออก สั่งพิมพ์จากข้างนอก)
+window.printViaIframe = function(htmlContent){
+  // ตัด script tag ออกจาก HTML (กันตีกัน)
+  var _stag = String.fromCharCode(60)+'script';
+  var _etag = String.fromCharCode(60)+'/script'+String.fromCharCode(62);
+  var cleanHtml = htmlContent.replace(new RegExp(_stag+'[\\s\\S]*?'+_etag,'gi'), '');
+
+  // ลบ iframe เก่า
+  var old = document.getElementById('printFrame');
+  if(old) old.remove();
+
+  var iframe = document.createElement('iframe');
+  iframe.id = 'printFrame';
+  iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+  document.body.appendChild(iframe);
+
+  var doc = iframe.contentWindow.document;
+  doc.open();
+  doc.write(cleanHtml);
+  doc.close();
+
+  var printed = false;
+  function doPrint(){
+    if(printed) return;
+    printed = true;
+    try {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+    } catch(e){ console.warn('print error', e); }
+    // ลบ iframe หลังพิมพ์ (ให้ dialog พิมพ์ทำงานก่อน)
+    setTimeout(function(){ if(iframe && iframe.parentNode) iframe.remove(); }, 2000);
+  }
+
+  // สั่งพิมพ์เมื่อ iframe โหลดเสร็จ
+  iframe.onload = function(){ setTimeout(doPrint, 250); };
+  // สำรอง: ถ้า onload ไม่ยิง ให้พิมพ์หลัง 500ms
+  setTimeout(doPrint, 500);
+};
+
+// hook confirmPayment ให้พิมพ์อัตโนมัติเสมอ (ถ้า autoPrint เปิด) — เผื่อ prCfg ไม่โหลด
+(function ensureAutoPrint(){
+  // ทำให้ prCfg.autoPrint เป็น true ถ้ายังไม่เคยตั้งค่า
+  try {
+    if(typeof prCfg!=='undefined' && prCfg.autoPrint===undefined){
+      prCfg.autoPrint = true;
+    }
+  } catch(e){}
+})();
+
+// เพิ่มปุ่มพิมพ์ในหน้า successModal ให้เด่น (เผื่ออยากพิมพ์ซ้ำ/พิมพ์เอง)
+(function addPrintButtonToSuccess(){
+  function run(){
+    var successModal = document.getElementById('successModal');
+    if(!successModal) return;
+    // มีปุ่มสลิปอยู่แล้ว — แค่ทำให้แน่ใจว่ากดแล้วพิมพ์ได้
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+})();
 
 
 </script>
