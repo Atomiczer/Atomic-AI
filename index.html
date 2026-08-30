@@ -11943,6 +11943,206 @@ function openPinnedManager(){
 })();
 
 
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 28: แก้ค้นหาช้า + พิมพ์ผ่าน iframe
+// ============================================================
+
+// ==================== 1. ค้นหาเร็วขึ้น (debounce + จำกัดผล) ====================
+var _searchTimer = null;
+var SEARCH_RESULT_LIMIT = 60; // แสดงผลค้นหาสูงสุด 60 รายการ
+
+// override filterProducts ให้ debounce
+window.filterProducts = function(){
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(function(){
+    renderProducts();
+  }, 220); // รอหยุดพิมพ์ 220ms
+};
+
+// override renderProducts ให้ค้นหาเร็ว (includes ก่อน, fuzzy เฉพาะเมื่อจำเป็น)
+var _prevRenderProducts = window.renderProducts;
+window.renderProducts = function(){
+  var searchEl = document.getElementById('searchInput');
+  var search = searchEl ? searchEl.value.trim() : '';
+  var grid = document.getElementById('productsGrid');
+  if(!grid) return;
+
+  // ไม่ค้นหา + หมวดทั้งหมด → ให้ Part 26 (ปักหมุด) จัดการ
+  if(!search && (typeof currentCat==='undefined' || currentCat==='ทั้งหมด')){
+    _prevRenderProducts.apply(this, arguments);
+    if(typeof addPinButtonsToCards==='function') addPinButtonsToCards();
+    return;
+  }
+
+  var list = PRODUCTS.filter(function(p){ return p.visible!==false; });
+
+  // กรองหมวด
+  if(typeof currentCat!=='undefined' && currentCat!=='ทั้งหมด'){
+    list = list.filter(function(p){ return p.cat===currentCat; });
+  }
+
+  // ค้นหา — วิธีเร็ว: includes ก่อน (ตรงตัว) แล้วค่อย fuzzy เฉพาะถ้าผลน้อย
+  if(search){
+    var q = search.toLowerCase();
+    // แปลงบาร์โค้ดไทยมั่ว
+    if(typeof convertThaiBarcodeToDigits==='function'){
+      var conv = convertThaiBarcodeToDigits(search);
+      if(conv!==search && /^[0-9]+$/.test(conv)) q = conv.toLowerCase();
+    }
+
+    // รอบ 1: หาแบบตรงตัว (เร็วมาก)
+    var exact = [];
+    for(var i=0;i<list.length && exact.length<SEARCH_RESULT_LIMIT;i++){
+      var p = list[i];
+      if(p.name.toLowerCase().indexOf(q)!==-1 || (p.barcode && p.barcode.indexOf(q)!==-1)){
+        exact.push(p);
+      }
+    }
+
+    // ถ้าเจอพอแล้ว ใช้เลย (ไม่ต้อง fuzzy)
+    if(exact.length >= 5 || q.length <= 2){
+      list = exact;
+    } else {
+      // รอบ 2: fuzzy เสริม (เฉพาะเมื่อผลตรงตัวน้อย) — จำกัดจำนวนที่ scan
+      var fuzzyResults = exact.slice();
+      var exactIds = {};
+      exact.forEach(function(p){ exactIds[p.id]=true; });
+      var scanned = 0, MAX_FUZZY_SCAN = 2000; // จำกัด scan fuzzy 2000 ตัว (กันช้า)
+      for(var j=0;j<list.length && fuzzyResults.length<SEARCH_RESULT_LIMIT && scanned<MAX_FUZZY_SCAN;j++){
+        var pp = list[j];
+        if(exactIds[pp.id]) continue;
+        scanned++;
+        if(typeof fuzzyScore==='function' && fuzzyScore(pp.name, q) >= 30){
+          fuzzyResults.push(pp);
+        }
+      }
+      list = fuzzyResults;
+    }
+  }
+
+  // จำกัดผล
+  var limited = list.slice(0, SEARCH_RESULT_LIMIT);
+  var hasMore = list.length > SEARCH_RESULT_LIMIT;
+
+  if(!limited.length){
+    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--text-muted);font-size:13px">'
+      + (search ? 'ไม่พบสินค้าที่ตรงกับ "<strong>'+search+'</strong>"' : 'ไม่พบสินค้า')
+      + '</div>';
+    return;
+  }
+
+  // render (ใช้ renderProductCards จาก Part 26 ถ้ามี)
+  if(typeof renderProductCards==='function'){
+    renderProductCards(limited);
+  } else {
+    _prevRenderProducts.apply(this, arguments);
+    return;
+  }
+
+  if(hasMore){
+    var more = document.createElement('div');
+    more.style.cssText = 'grid-column:1/-1;text-align:center;padding:10px;color:var(--text-muted);font-size:11px';
+    more.textContent = 'แสดง '+SEARCH_RESULT_LIMIT+' รายการแรก — พิมพ์ให้เจาะจงขึ้นเพื่อดูผลที่ตรงกว่า';
+    grid.appendChild(more);
+  }
+
+  if(typeof addPinButtonsToCards==='function') addPinButtonsToCards();
+};
+
+// ==================== 2. พิมพ์ผ่าน iframe (ไม่เปิด popup) ====================
+function printViaIframe(htmlContent){
+  // ลบ iframe เก่า
+  var old = document.getElementById('printFrame');
+  if(old) old.remove();
+
+  var iframe = document.createElement('iframe');
+  iframe.id = 'printFrame';
+  iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+  document.body.appendChild(iframe);
+
+  var doc = iframe.contentWindow.document;
+  doc.open();
+  doc.write(htmlContent);
+  doc.close();
+
+  // รอโหลดเสร็จแล้วสั่งพิมพ์
+  iframe.onload = function(){
+    setTimeout(function(){
+      try {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+      } catch(e){ console.warn('print error', e); }
+      // ลบ iframe หลังพิมพ์ (รอ 1 วิ)
+      setTimeout(function(){ if(iframe && iframe.parentNode) iframe.remove(); }, 1000);
+    }, 300);
+  };
+  // เผื่อ onload ไม่ยิง (บาง browser) — สั่งพิมพ์หลัง 600ms
+  setTimeout(function(){
+    if(iframe && iframe.contentWindow){
+      try { iframe.contentWindow.focus(); iframe.contentWindow.print(); } catch(e){}
+    }
+  }, 600);
+}
+
+
+// ==================== 3. เปลี่ยน printReceipt ให้ใช้ iframe ====================
+// เก็บ printReceipt เดิมไว้ แล้ว intercept window.open ตอนเรียก printReceipt
+// วิธี: override printReceipt ให้ดัก window.open ชั่วคราว → ส่ง html เข้า iframe แทน
+(function patchPrintReceiptToIframe(){
+  var origPrintReceipt = window.printReceipt;
+  if(typeof origPrintReceipt !== 'function') return;
+
+  window.printReceipt = function(){
+    // ดัก window.open ชั่วคราว
+    var realOpen = window.open;
+    var captured = null;
+    window.open = function(){
+      // คืน fake window ที่เก็บ html
+      captured = {
+        document: {
+          _html: '',
+          write: function(h){ this._html += h; },
+          close: function(){}
+        },
+        focus:function(){}, print:function(){}, close:function(){}
+      };
+      return captured;
+    };
+
+    try {
+      origPrintReceipt.apply(this, arguments);
+    } catch(e){ console.warn('printReceipt error', e); }
+
+    // คืน window.open
+    window.open = realOpen;
+
+    // ถ้าจับ html ได้ → พิมพ์ผ่าน iframe
+    if(captured && captured.document._html){
+      printViaIframe(captured.document._html);
+    }
+  };
+})();
+
+// เปลี่ยน printReceiptA4 ให้ใช้ iframe ด้วย
+(function patchPrintA4ToIframe(){
+  var origA4 = window.printReceiptA4;
+  if(typeof origA4 !== 'function') return;
+  window.printReceiptA4 = function(){
+    var realOpen = window.open;
+    var captured = null;
+    window.open = function(){
+      captured = { document:{ _html:'', write:function(h){this._html+=h;}, close:function(){} }, focus:function(){}, print:function(){}, close:function(){} };
+      return captured;
+    };
+    try { origA4.apply(this, arguments); } catch(e){}
+    window.open = realOpen;
+    if(captured && captured.document._html){ printViaIframe(captured.document._html); }
+  };
+})();
+
+
 </script>
 
 
