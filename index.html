@@ -11092,6 +11092,427 @@ window.confirmImport = function(){
 };
 
 
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 20: แก้บาร์โค้ด E+ notation จาก Excel
+// ============================================================
+// ปัญหา: Excel แปลงบาร์โค้ด 13 หลักเป็น "8.85E+12" ทำให้ซ้ำกันหมด
+// แก้: ตรวจจับ E+ notation → ถือว่าบาร์โค้ดใช้ไม่ได้ → ไม่เอามาเช็คซ้ำ
+
+// ฟังก์ชันตรวจว่าบาร์โค้ดใช้ได้ไหม (ไม่ใช่ scientific notation / ไม่สั้นเกินไป)
+function isValidBarcode(bc){
+  if(!bc) return false;
+  bc = String(bc).trim();
+  // E+ notation (เช่น 8.85E+12) = เสียจาก Excel
+  if(/[eE]\+?\d+/.test(bc)) return false;
+  // มีจุดทศนิยม = เสีย (บาร์โค้ดจริงไม่มีทศนิยม)
+  if(bc.indexOf('.')!==-1) return false;
+  // ต้องเป็นตัวเลขล้วน อย่างน้อย 6 หลัก
+  if(!/^[0-9]+$/.test(bc)) return false;
+  if(bc.length < 6) return false;
+  return true;
+}
+
+// override parseImportRows: จัดการบาร์โค้ดเสีย
+window.parseImportRows = function(rows){
+  if(!rows || !rows.length){ showToast('ไฟล์ว่างเปล่า'); return; }
+  var header = rows[0].map(function(c){ return String(c).trim().replace(/^\uFEFF/,''); });
+  var dataRows = rows.slice(1);
+
+  function findCol(keywords){
+    for(var i=0;i<header.length;i++){
+      var h = header[i].toLowerCase();
+      for(var k=0;k<keywords.length;k++){ if(h.indexOf(keywords[k])!==-1) return i; }
+    }
+    return -1;
+  }
+  var cName = findCol(['ชื่อ','name','สินค้า','รายการ']);
+  var cPrice = findCol(['ราคาขาย','ราคา','price','ขาย']);
+  var cCost = findCol(['ต้นทุน','cost','ทุน']);
+  var cCat = findCol(['หมวด','category','cat','ประเภท','กลุ่ม']);
+  var cStock = findCol(['สต๊อก','สต็อก','stock','คงเหลือ','จำนวน','คลัง']);
+  var cBarcode = findCol(['บาร์โค้ด','บาร์โค๊ด','barcode','รหัสสินค้า','รหัส','sku']);
+
+  if(cName<0){ cName=0; if(cPrice<0)cPrice=1; if(cCost<0)cCost=2; if(cCat<0)cCat=3; if(cStock<0)cStock=4; if(cBarcode<0)cBarcode=5; }
+
+  var badBarcodeCount = 0;
+
+  importParsedRows = dataRows.map(function(r, idx){
+    var name = String((r[cName]!==undefined && r[cName]!==null) ? r[cName] : '').trim();
+    var priceRaw = (r[cPrice]!==undefined && r[cPrice]!==null) ? String(r[cPrice]).replace(/[^0-9.\-]/g,'') : '';
+    var price = parseFloat(priceRaw)||0;
+    var cost = cCost>=0 ? (parseFloat(String(r[cCost]).replace(/[^0-9.\-]/g,''))||0) : 0;
+    var cat = cCat>=0 ? String((r[cCat]!==undefined&&r[cCat]!==null)?r[cCat]:'').trim() : '';
+    var stock = cStock>=0 ? (parseInt(String(r[cStock]).replace(/[^0-9\-]/g,''))||0) : 0;
+    var barcodeRaw = cBarcode>=0 ? String((r[cBarcode]!==undefined&&r[cBarcode]!==null)?r[cBarcode]:'').trim() : '';
+
+    // แปลงบาร์โค้ดไทยมั่ว
+    if(barcodeRaw && typeof convertThaiBarcodeToDigits==='function') barcodeRaw = convertThaiBarcodeToDigits(barcodeRaw);
+
+    // ตรวจบาร์โค้ดเสีย (E+ notation จาก Excel) → ทิ้ง ถือว่าไม่มีบาร์โค้ด
+    var barcode = '';
+    if(isValidBarcode(barcodeRaw)){
+      barcode = barcodeRaw;
+    } else if(barcodeRaw){
+      badBarcodeCount++;
+      barcode = ''; // บาร์โค้ดเสีย → ไม่ใช้ (สินค้าจะยังเพิ่มได้ด้วยชื่อ)
+    }
+
+    var err = '';
+    if(!name){ err='ไม่มีชื่อ'; }
+    else if(price<=0){ err='ราคาเป็น 0'; }
+
+    if(!cat) cat = 'ทั่วไป';
+
+    return { name:name, price:price, cost:cost, cat:cat, stock:stock, barcode:barcode, err:err, _row:idx+2, _badBc:(barcodeRaw && !barcode) };
+  }).filter(function(r){
+    return r.name || r.price>0;
+  });
+
+  window._importBadBarcodeCount = badBarcodeCount;
+  renderImportPreview();
+};
+
+// override confirmImport: เช็คซ้ำด้วยบาร์โค้ด(ถ้าใช้ได้) หรือชื่อ
+window.confirmImport = function(){
+  var validRows = importParsedRows.filter(function(r){ return !r.err; });
+  if(!validRows.length){ showToast('ไม่มีข้อมูลที่ถูกต้องให้นำเข้า'); return; }
+  var updateExisting = document.getElementById('importUpdateExisting').checked;
+
+  var badBc = window._importBadBarcodeCount||0;
+  var warnMsg = 'จะนำเข้า '+validRows.length+' รายการ';
+  if(badBc>0) warnMsg += '\n⚠️ พบ '+badBc+' รายการที่บาร์โค้ดเสีย (Excel แปลงเป็น E+) — จะเพิ่มโดยไม่ใส่บาร์โค้ด';
+  if(updateExisting) warnMsg += '\n(อัปเดตสินค้าเดิมถ้าตรงกัน)';
+
+  showConfirm('ยืนยันนำเข้าสินค้า', warnMsg, '📊', 'นำเข้า', '').then(function(ok){
+    if(!ok) return;
+
+    // index สำหรับเช็คซ้ำ
+    var barcodeIndex = {}, nameIndex = {};
+    PRODUCTS.forEach(function(p){
+      if(p.barcode) barcodeIndex[p.barcode]=p;
+      nameIndex[p.name]=p;
+    });
+
+    var added=0, updated=0, skippedDup=0;
+    var newCatSet = {}, newCats=0;
+
+    validRows.forEach(function(r){
+      if(r.cat && !CATEGORIES.find(function(c){return c.name===r.cat;}) && !newCatSet[r.cat]){
+        CATEGORIES.push({ name:r.cat, emoji:'🏷️' });
+        newCatSet[r.cat]=true; newCats++;
+      }
+
+      // เช็คซ้ำ: มีบาร์โค้ดใช้ได้ → เช็คบาร์โค้ด, ไม่มี → เช็คชื่อ
+      var existing = null;
+      if(r.barcode && barcodeIndex[r.barcode]){
+        existing = barcodeIndex[r.barcode];
+      }
+      // ไม่เช็คซ้ำด้วยชื่อ (เพราะชื่ออาจซ้ำได้ และผู้ใช้ต้องการทุกแถว)
+      // → ถ้าไม่มีบาร์โค้ด เพิ่มใหม่เสมอ
+
+      if(existing && updateExisting){
+        existing.name=r.name; existing.price=r.price; existing.cost=r.cost;
+        existing.cat=r.cat; existing.stock=r.stock; existing.priceRetail=r.price;
+        updated++;
+      } else if(existing && !updateExisting){
+        skippedDup++;
+      } else {
+        var np = {
+          id: nextId++, name:r.name, price:r.price, emoji:'📦', cat:r.cat,
+          stock:r.stock, barcode:r.barcode, cost:r.cost,
+          priceRetail:r.price, priceWholesale:r.price, priceVip:r.price, visible:true
+        };
+        PRODUCTS.push(np);
+        if(r.barcode) barcodeIndex[r.barcode]=np;
+        added++;
+      }
+    });
+
+    saveProducts(); saveStock(); if(typeof saveCategories==='function') saveCategories();
+    renderProducts(); renderCategories();
+    if(typeof renderProdTable==='function') renderProdTable();
+    if(typeof checkStockAlert==='function') checkStockAlert();
+    closeModal('importModal');
+
+    var msg = '✅ นำเข้าสำเร็จ: เพิ่ม '+added+' รายการ';
+    if(updated>0) msg += ', อัปเดต '+updated;
+    if(skippedDup>0) msg += ', ข้าม(ซ้ำ) '+skippedDup;
+    if(newCats>0) msg += ', หมวดใหม่ '+newCats;
+    showToast(msg);
+
+    if(badBc>0){
+      setTimeout(function(){
+        showToast('💡 '+badBc+' รายการบาร์โค้ดเสียจาก Excel — ดูวิธีแก้ไฟล์ที่ผมแนะนำ');
+      }, 2500);
+    }
+  });
+};
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 21: แก้ sync ข้อมูลใหญ่ (chunking > 1MB)
+// ============================================================
+// ปัญหา: Firestore เก็บ 1 document ได้ไม่เกิน 1MB แต่สินค้า 6000+ รายการ ~1.5MB
+// แก้: แบ่งข้อมูลใหญ่เป็นก้อนๆ (chunk ละ ~700KB) เก็บหลาย document
+
+var CHUNK_SIZE = 700 * 1024; // 700KB ต่อก้อน (เผื่อ overhead)
+
+// เขียนค่าขึ้น cloud แบบแบ่งก้อนถ้าใหญ่เกิน
+function pushToCloudChunked(key, value){
+  if(!fbReady || !isCloudSyncEnabled()) return Promise.resolve();
+  if(fbApplyingRemote) return Promise.resolve();
+
+  var strVal = String(value);
+  var device = getDeviceId();
+
+  // ถ้าเล็กกว่า chunk → เก็บแบบเดิม (document เดียว)
+  if(strVal.length <= CHUNK_SIZE){
+    return fbDocRef(key).set({
+      value: strVal, updatedAt: Date.now(), device: device, chunked: false
+    });
+  }
+
+  // ใหญ่เกิน → แบ่งก้อน
+  var chunks = [];
+  for(var i=0; i<strVal.length; i+=CHUNK_SIZE){
+    chunks.push(strVal.slice(i, i+CHUNK_SIZE));
+  }
+
+  // เขียน meta document (บอกว่าแบ่งกี่ก้อน) + ก้อนย่อย
+  var batch = fbDb.batch();
+  batch.set(fbDocRef(key), {
+    chunked: true, chunkCount: chunks.length,
+    updatedAt: Date.now(), device: device
+  });
+  chunks.forEach(function(chunk, idx){
+    var chunkRef = fbDb.collection('shops').doc(SHOP_ID).collection('data')
+                     .doc(key).collection('chunks').doc('c'+idx);
+    batch.set(chunkRef, { data: chunk, idx: idx });
+  });
+  return batch.commit();
+}
+
+// override pushToCloud ให้ใช้ chunking
+window.pushToCloud = function(key, value){
+  if(!fbReady || !isCloudSyncEnabled()) return;
+  if(fbApplyingRemote) return;
+  clearTimeout(fbWriteTimers[key]);
+  fbWriteTimers[key] = setTimeout(function(){
+    pushToCloudChunked(key, value).catch(function(err){
+      console.warn('sync push error', key, err && err.message);
+      showToast('⚠️ ซิงค์ '+key+' ไม่สำเร็จ: '+(err&&err.message||''));
+    });
+  }, 400);
+};
+
+// อ่านค่าจาก cloud แบบรองรับ chunk
+function fetchFromCloudChunked(key){
+  return fbDocRef(key).get().then(function(doc){
+    if(!doc.exists) return null;
+    var data = doc.data();
+    if(!data) return null;
+    // ไม่ได้แบ่งก้อน → คืนค่าเลย
+    if(!data.chunked){
+      return { value: data.value, updatedAt: data.updatedAt, device: data.device };
+    }
+    // แบ่งก้อน → ดึงทุกก้อนมาต่อ
+    var chunkCol = fbDb.collection('shops').doc(SHOP_ID).collection('data')
+                     .doc(key).collection('chunks');
+    return chunkCol.get().then(function(snap){
+      var parts = [];
+      snap.forEach(function(d){ var cd=d.data(); parts[cd.idx]=cd.data; });
+      return { value: parts.join(''), updatedAt: data.updatedAt, device: data.device };
+    });
+  });
+}
+
+// override uploadAllToCloud ให้ใช้ chunking
+window.uploadAllToCloud = async function(){
+  if(!fbReady){ var ok = await initFirebase(); if(!ok) return 0; }
+  var count = 0;
+  for(var i=0;i<SYNC_KEYS.length;i++){
+    var key = SYNC_KEYS[i];
+    var val = localStorage.getItem(key);
+    if(val !== null){
+      try {
+        await pushToCloudChunked(key, val);
+        count++;
+      } catch(e){
+        console.warn('upload error', key, e.message);
+        showToast('⚠️ อัปโหลด '+key+' ไม่สำเร็จ: '+e.message);
+      }
+    }
+  }
+  return count;
+};
+
+// override downloadAllFromCloud ให้ใช้ chunking
+window.downloadAllFromCloud = async function(){
+  if(!fbReady){ var ok = await initFirebase(); if(!ok) return 0; }
+  var count = 0;
+  for(var i=0;i<SYNC_KEYS.length;i++){
+    var key = SYNC_KEYS[i];
+    try {
+      var result = await fetchFromCloudChunked(key);
+      if(result && result.value!==undefined && result.value!==null){
+        fbApplyingRemote = true;
+        _origSetItem(key, result.value);
+        fbApplyingRemote = false;
+        count++;
+      }
+    } catch(e){ console.warn('download error', key, e.message); }
+  }
+  if(count>0){ reloadEverything(); }
+  return count;
+};
+
+// override subscribeCloud ให้รองรับ chunk (ฟัง meta doc แล้วดึง chunk)
+window.subscribeCloud = function(){
+  fbUnsubscribers.forEach(function(u){ try{u();}catch(e){} });
+  fbUnsubscribers = [];
+
+  SYNC_KEYS.forEach(function(key){
+    var unsub = fbDocRef(key).onSnapshot(function(doc){
+      if(!doc.exists) return;
+      var data = doc.data();
+      if(!data) return;
+      if(data.device === getDeviceId()) return; // เปลี่ยนจากเครื่องเราเอง ข้าม
+
+      // ดึงค่าจริง (รองรับ chunk)
+      fetchFromCloudChunked(key).then(function(result){
+        if(!result || result.value===undefined || result.value===null) return;
+        fbApplyingRemote = true;
+        try { _origSetItem.call(localStorage, key, result.value); } catch(e){}
+        fbApplyingRemote = false;
+        reloadDataFromLocal(key);
+      });
+    }, function(err){
+      console.warn('sync subscribe error', key, err.message);
+    });
+    fbUnsubscribers.push(unsub);
+  });
+};
+
+// ถ้าเปิด sync อยู่แล้ว restart subscription ให้ใช้ตัวใหม่
+(function restartSyncIfActive(){
+  function run(){
+    if(typeof isCloudSyncEnabled==='function' && isCloudSyncEnabled() && fbReady){
+      subscribeCloud();
+    }
+  }
+  setTimeout(run, 1500);
+})();
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 22: เอา emoji ตกแต่งออกจากทุกที่
+// ============================================================
+// เก็บสัญลักษณ์ UI ที่จำเป็น (✕ ✓ → ⚠ ❌ ✅ ×) เพื่อไม่ให้ปุ่มปิด/สถานะพัง
+// เอา emoji ตกแต่งออก (📦 🛒 💾 🏷 ฯลฯ)
+
+// สัญลักษณ์ที่ "เก็บไว้" (ทำหน้าที่ UI)
+var KEEP_SYMBOLS = ['✕','×','✓','✔','→','←','⚠','❌','✅','⭐','●','○','—'];
+
+// regex จับ emoji ตกแต่ง (ไม่รวมที่เก็บไว้)
+function stripDecorativeEmoji(text){
+  if(!text) return text;
+  // จับ emoji ในช่วงหลักๆ
+  var emojiRe = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F000}-\u{1F0FF}\u{2B00}-\u{2BFF}\u{1F1E6}-\u{1F1FF}\u{FE00}-\u{FE0F}\u{200D}]/gu;
+  var result = '';
+  for(var ch of text){
+    if(KEEP_SYMBOLS.indexOf(ch)!==-1){ result += ch; continue; }
+    if(emojiRe.test(ch)){ emojiRe.lastIndex=0; continue; } // ข้าม emoji
+    emojiRe.lastIndex=0;
+    result += ch;
+  }
+  // ลบช่องว่างซ้อนที่เกิดจากการลบ emoji
+  return result.replace(/\s{2,}/g,' ').replace(/^\s+|\s+$/g,'');
+}
+
+// เอา emoji ออกจาก text nodes ทั้งหน้า (ยกเว้นใน input/textarea/script/style)
+function removeEmojiFromDOM(root){
+  root = root || document.body;
+  var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: function(node){
+      var p = node.parentElement;
+      if(!p) return NodeFilter.FILTER_REJECT;
+      var tag = p.tagName;
+      if(tag==='SCRIPT'||tag==='STYLE'||tag==='INPUT'||tag==='TEXTAREA') return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    }
+  });
+  var nodes = [];
+  var n;
+  while(n = walker.nextNode()){ nodes.push(n); }
+  nodes.forEach(function(node){
+    var stripped = stripDecorativeEmoji(node.nodeValue);
+    if(stripped !== node.nodeValue){ node.nodeValue = stripped; }
+  });
+}
+
+// เอา emoji ออกจากสินค้า (ตั้ง emoji = '' หรือซ่อน)
+function removeProductEmojis(){
+  if(typeof PRODUCTS==='undefined') return;
+  var changed = false;
+  PRODUCTS.forEach(function(p){
+    if(p.emoji && p.emoji!==''){ p._emojiHidden = p.emoji; p.emoji=''; changed=true; }
+  });
+  // ไม่ save (แค่ซ่อนตอนแสดง) — ถ้าอยากถาวรค่อย save
+}
+
+// CSS ซ่อนอีโมจิสินค้าในการ์ด (กันที่ render ใหม่)
+(function injectNoEmojiCSS(){
+  var style = document.createElement('style');
+  style.id = 'noEmojiStyles';
+  style.textContent = ''
+    + '.pemoji, .item-emoji { display:none !important; }'  // ซ่อนอีโมจิสินค้า
+    + '.pcard .pname { margin-top: 4px; }';
+  document.head.appendChild(style);
+})();
+
+// รันเอา emoji ออกหลัง render ทุกครั้ง
+function applyNoEmoji(){
+  removeEmojiFromDOM(document.body);
+}
+
+// hook render functions ให้เอา emoji ออกหลัง render
+(function hookRenders(){
+  ['renderProducts','renderOrder','renderCategories'].forEach(function(fn){
+    var _orig = window[fn];
+    if(typeof _orig==='function'){
+      window[fn] = function(){
+        _orig.apply(this, arguments);
+        setTimeout(applyNoEmoji, 10);
+      };
+    }
+  });
+})();
+
+// เอา emoji ออกตอนโหลด + ทุก 2 วิ (กัน dynamic content)
+(function initNoEmoji(){
+  function run(){ applyNoEmoji(); }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 500);
+  setTimeout(run, 1500);
+  // observer จับ DOM ใหม่
+  try {
+    var mo = new MutationObserver(function(muts){
+      var need=false;
+      muts.forEach(function(m){ if(m.addedNodes && m.addedNodes.length) need=true; });
+      if(need){ clearTimeout(window._noEmojiTimer); window._noEmojiTimer=setTimeout(applyNoEmoji, 100); }
+    });
+    mo.observe(document.body, { childList:true, subtree:true });
+  } catch(e){}
+})();
+
+
 </script>
 
 
