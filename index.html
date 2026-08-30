@@ -10611,18 +10611,8 @@ document.addEventListener('keydown', function(e){
   // ไม่ทำงานถ้ามี modal เปิดอยู่ หรือกำลังพิมพ์ในช่อง (ยกเว้น searchInput ที่ว่าง)
   var anyModal = document.querySelector('.modal-overlay.show');
   if(anyModal) return;
-  var active = document.activeElement;
-  var tag = active ? active.tagName.toLowerCase() : '';
-  // ถ้าอยู่ในช่องค้นหาและมีข้อความ = ให้ handleSearchKeydown จัดการ (หาสินค้า)
-  if(active && active.id==='searchInput' && active.value.trim()) return;
-  if(tag==='input'||tag==='textarea'||tag==='select'){
-    if(active.id!=='searchInput') return;
-  }
-  // เปิดชำระเงินสด
-  if(order && order.length){
-    e.preventDefault();
-    openPayment('cash');
-  }
+  // [ปิดใช้งาน] Enter ไม่เปิดชำระเงินอัตโนมัติแล้ว (กันเด้งคิดเงินตอนยิงบาร์โค้ด)
+  return;
 });
 
 // ---------- init ----------
@@ -10737,19 +10727,8 @@ function toggleRangoMode(on){
 
 // ---------- 5. Enter ที่หน้าขาย = ชำระเงินสด (ยังคงไว้ แม้ปิด rango) ----------
 document.addEventListener('keydown', function(e){
-  if(e.key!=='Enter') return;
-  var anyModal = document.querySelector('.modal-overlay.show');
-  if(anyModal) return;
-  var active = document.activeElement;
-  var tag = active ? active.tagName.toLowerCase() : '';
-  if(active && active.id==='searchInput' && active.value.trim()) return; // ให้ค้นหาทำงานก่อน
-  if(tag==='input'||tag==='textarea'||tag==='select'){
-    if(active.id!=='searchInput') return;
-  }
-  if(typeof order!=='undefined' && order && order.length){
-    e.preventDefault();
-    if(typeof openPayment==='function') openPayment('cash');
-  }
+  // [ปิดใช้งาน] Enter ไม่เปิดชำระเงินอัตโนมัติแล้ว (กันเด้งคิดเงินตอนยิงบาร์โค้ด)
+  return;
 });
 
 
@@ -10807,14 +10786,12 @@ if(typeof window.ensureBigTotalDisplay==='function'){
 // ป้าย (Enter) เพิ่มที่ปุ่มเดิมให้รู้ว่ากด Enter ได้
 (function labelCashButtonEnter(){
   function run(){
-    var cash = document.querySelector('.pay-btn.pay-cash');
-    if(cash && !cash.dataset.enterLabeled){
-      // เพิ่มคำว่า (Enter) ถ้ายังไม่มี
-      if(!cash.textContent.includes('Enter')){
-        cash.innerHTML = cash.innerHTML.replace('ชำระเงินสด', 'ชำระเงินสด (Enter)');
-      }
-      cash.dataset.enterLabeled = '1';
-    }
+    // ลบป้าย (Enter) ออกจากปุ่มชำระเงินหน้าขาย (Enter ไม่เปิดชำระเงินแล้ว)
+    var cashBtns = document.querySelectorAll('.pay-btn.pay-cash');
+    cashBtns.forEach(function(cash){
+      if(cash.closest('.modal-overlay')) return; // ปุ่มใน modal เก็บ (Enter) ไว้
+      cash.innerHTML = cash.innerHTML.replace(' (Enter)','').replace('(Enter)','');
+    });
   }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
   else run();
@@ -11821,6 +11798,142 @@ setTimeout(function(){
   // หา observer ที่ยัง active แล้วปิด — ทำผ่านการ override MutationObserver ชั่วคราวไม่ได้
   // แต่เราแทน applyNoEmoji เป็นเบาแล้ว จึงไม่หนักแม้ observer ยังวิ่ง
 }, 100);
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 26: สินค้าขายด่วน (ปักหมุด 20 ตัว)
+// ============================================================
+// หน้าขายโชว์แค่สินค้าที่ปักหมุด (สูงสุด 20) เมื่อไม่ได้ค้นหา
+// ค้นหา/ยิงบาร์โค้ด ยังหาได้ทุกตัว → เร็วขึ้นมากเพราะไม่ render 6000 การ์ด
+
+var SK_PINNED = 'pos_pinned_products_v1';
+var MAX_PINNED = 20;
+
+function loadPinned(){
+  try { var s=localStorage.getItem(SK_PINNED); if(s) return JSON.parse(s); } catch(e){}
+  return [];
+}
+function savePinned(arr){ localStorage.setItem(SK_PINNED, JSON.stringify(arr)); }
+var pinnedIds = loadPinned();
+
+function isPinned(id){ return pinnedIds.indexOf(id)!==-1; }
+function togglePin(id){
+  var idx = pinnedIds.indexOf(id);
+  if(idx>=0){ pinnedIds.splice(idx,1); }
+  else {
+    if(pinnedIds.length>=MAX_PINNED){ showToast('ปักหมุดได้สูงสุด '+MAX_PINNED+' รายการ'); return; }
+    pinnedIds.push(id);
+  }
+  savePinned(pinnedIds);
+  renderProducts();
+}
+
+// override renderProducts: โชว์แค่ปักหมุดเมื่อไม่ได้ค้นหา
+var _origRenderProducts = window.renderProducts;
+window.renderProducts = function(){
+  var search = document.getElementById('searchInput');
+  var searchVal = search ? search.value.trim() : '';
+  var grid = document.getElementById('productsGrid');
+  if(!grid) return;
+
+  // มีค้นหา หรือเลือกหมวด → ใช้ระบบเดิม (หาได้ทุกตัว)
+  if(searchVal || (typeof currentCat!=='undefined' && currentCat!=='ทั้งหมด')){
+    _origRenderProducts.apply(this, arguments);
+    addPinButtonsToCards();
+    return;
+  }
+
+  // ไม่ค้นหา + หมวด "ทั้งหมด" → โชว์แค่สินค้าปักหมุด
+  var pinnedProducts = pinnedIds
+    .map(function(id){ return PRODUCTS.find(function(p){return p.id===id && p.visible!==false;}); })
+    .filter(Boolean);
+
+  if(pinnedProducts.length===0){
+    // ยังไม่ปักหมุด → แสดงคำแนะนำ + 20 ตัวแรก
+    var first20 = PRODUCTS.filter(function(p){return p.visible!==false;}).slice(0,20);
+    if(first20.length===0){
+      grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--text-muted)">ยังไม่มีสินค้า</div>';
+      return;
+    }
+    renderProductCards(first20);
+    // แถบแนะนำ
+    var tip = document.getElementById('pinnedTip');
+    if(!tip){
+      tip = document.createElement('div');
+      tip.id = 'pinnedTip';
+      tip.style.cssText = 'grid-column:1/-1;background:#e3f2fd;border:1px solid #90caf9;border-radius:10px;padding:10px 14px;font-size:12px;color:#1565c0;margin-bottom:4px';
+      tip.innerHTML = '💡 แสดง 20 รายการแรก — กดปุ่ม "ปักหมุด" ที่การ์ดสินค้าเพื่อเลือกสินค้าขายด่วน (สูงสุด 20 ตัว) · สินค้าอื่นค้นหา/ยิงบาร์โค้ดได้';
+      grid.insertBefore(tip, grid.firstChild);
+    }
+    addPinButtonsToCards();
+    return;
+  }
+
+  // โชว์สินค้าปักหมุด
+  renderProductCards(pinnedProducts);
+  addPinButtonsToCards();
+};
+
+// render การ์ดจาก list ที่กำหนด (ใช้ HTML แบบเดียวกับ renderProducts เดิม)
+function renderProductCards(list){
+  var grid = document.getElementById('productsGrid');
+  grid.innerHTML = list.map(function(p){
+    var inOrd = order.find(function(i){ return i.id===p.id; });
+    var qty = inOrd ? inOrd.qty : 0;
+    var sc = (typeof getStockClass==='function') ? getStockClass(p.stock) : '';
+    return '<div class="pcard ' + (qty > 0 ? 'in-order' : '') + '" '
+      + 'style="' + (p.stock === 0 ? 'opacity:0.6;cursor:not-allowed' : '') + '" '
+      + 'onclick="addToOrder(' + p.id + ')">'
+      + (qty > 0 ? '<div class="badge">' + qty + '</div>' : '')
+      + (p.stock === 0 ? '<div class="out-badge">หมด</div>' : (p.stock <= 5 ? '<div class="low-badge">เหลือน้อย!</div>' : ''))
+      + '<div class="pemoji">' + (p.emoji||'') + '</div>'
+      + '<div class="pname">' + p.name + '</div>'
+      + '<div class="pprice">฿' + p.price.toLocaleString() + '</div>'
+      + '<div class="pstock ' + sc + '">คงเหลือ: ' + p.stock + '</div>'
+      + (p.barcode ? '<div class="pbarcode">' + p.barcode + '</div>' : '')
+      + '</div>';
+  }).join('');
+}
+
+// เพิ่มปุ่มปักหมุดที่มุมการ์ด
+function addPinButtonsToCards(){
+  var grid = document.getElementById('productsGrid');
+  if(!grid) return;
+  var cards = grid.querySelectorAll('.pcard');
+  cards.forEach(function(card){
+    if(card.querySelector('.pin-btn')) return;
+    // หา product id จาก onclick
+    var oc = card.getAttribute('onclick')||'';
+    var m = oc.match(/addToOrder\((\d+)\)/);
+    if(!m) return;
+    var pid = parseInt(m[1]);
+    var btn = document.createElement('button');
+    btn.className = 'pin-btn';
+    btn.style.cssText = 'position:absolute;top:4px;left:4px;width:24px;height:24px;border-radius:6px;border:none;cursor:pointer;font-size:13px;z-index:3;background:'+(isPinned(pid)?'#ffd54f':'rgba(0,0,0,0.08)')+';color:'+(isPinned(pid)?'#f57f17':'#999')+'';
+    btn.innerHTML = isPinned(pid)?'★':'☆';
+    btn.title = isPinned(pid)?'เอาออกจากขายด่วน':'ปักหมุดเป็นสินค้าขายด่วน';
+    btn.onclick = function(ev){ ev.stopPropagation(); togglePin(pid); };
+    card.appendChild(btn);
+  });
+}
+
+// เพิ่มปุ่มจัดการสินค้าขายด่วนแบบเลือกหลายตัว (ในหน้าจัดการสินค้า)
+function openPinnedManager(){
+  if(typeof openProductVisibilityManager==='function'){
+    // ใช้ modal เดิมถ้ามี หรือแสดง toast แนะนำ
+  }
+  showToast('💡 กดดาว ☆ ที่การ์ดสินค้าในหน้าขาย เพื่อปักหมุดสินค้าขายด่วน');
+}
+
+// init
+(function initPinned(){
+  function run(){ if(typeof renderProducts==='function') renderProducts(); }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 600);
+})();
 
 
 </script>
