@@ -2540,7 +2540,7 @@ Object.entries(dailyReport.catTotals||{}).forEach(function(e){if(!monthly[mk].ca
 }
 function loadPrinterCfg() {
   try { var s=localStorage.getItem(SK_PRINTER);if(s)return JSON.parse(s); } catch(e){}
-  return {paperSize:'80',ip:'',autoPrint:true,copies:1,receiptVAT:true,connections:{}};
+  return {paperSize:'80',ip:'',autoPrint:true,autoDrawer:true,copies:1,receiptVAT:true,connections:{}};
 }
 function savePrinterCfg() {
   prCfg.paperSize=document.getElementById('paperSize').value;
@@ -13473,6 +13473,97 @@ window.printViaIframe = function(htmlContent){
       return _orig.apply(this, arguments);
     };
   }
+})();
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 45: auto-focus ค้นหา + ลิ้นชักเปิดอัตโนมัติ
+// ============================================================
+
+// ===== 1. พิมพ์/ยิงบาร์โค้ดได้ทันที (auto-focus ช่องค้นหา) =====
+// ดักการพิมพ์ทั้งหน้า — ถ้าไม่ได้อยู่ในช่อง input ให้ส่งไปช่องค้นหาหน้าใหม่
+document.addEventListener('keydown', function(e){
+  // เฉพาะเมื่อหน้าปลีก-ส่งเปิดอยู่
+  var nsu = document.getElementById('newSellUI');
+  if(!nsu || nsu.style.display==='none') return;
+
+  // มี modal เปิดอยู่ → ไม่ดัก (ให้ modal จัดการ)
+  if(document.querySelector('.modal-overlay.show')) return;
+  if(document.getElementById('nsuPriceEditPop')) return;
+
+  var active = document.activeElement;
+  var tag = active ? active.tagName.toLowerCase() : '';
+  // ถ้ากำลังพิมพ์ในช่องอื่นอยู่แล้ว → ไม่ดัก
+  if(tag==='input' || tag==='textarea' || tag==='select') return;
+
+  var search = document.getElementById('nsuSearch');
+  if(!search) return;
+
+  // ตัวอักษร/ตัวเลข/บาร์โค้ด → โฟกัสช่องค้นหาแล้วให้พิมพ์ต่อ
+  if(e.key.length===1 && !e.ctrlKey && !e.altKey && !e.metaKey){
+    search.focus();
+    // ไม่ preventDefault → ตัวอักษรจะเข้าช่องเอง
+  } else if(e.key==='Enter'){
+    // Enter ที่ไม่ได้อยู่ในช่อง → ส่งไปช่องค้นหา (ถ้ามีข้อความ)
+    if(search.value.trim()){
+      search.focus();
+    }
+  }
+}, false);
+
+// โฟกัสช่องค้นหาทันทีเมื่อเปิดหน้าปลีก-ส่ง
+(function autoFocusOnOpen(){
+  var _orig = window.toggleNewUI;
+  window.toggleNewUI = function(on){
+    _orig(on);
+    if(on){
+      setTimeout(function(){
+        var s = document.getElementById('nsuSearch');
+        if(s) s.focus();
+      }, 200);
+    }
+  };
+})();
+
+// โฟกัสกลับช่องค้นหาหลังเพิ่มสินค้า (nsuRefresh)
+(function refocusAfterAdd(){
+  var _orig = window.nsuRefresh;
+  window.nsuRefresh = function(){
+    if(typeof _orig==='function') _orig();
+    // โฟกัสช่องค้นหา (ถ้าไม่มี modal เปิด)
+    if(!document.querySelector('.modal-overlay.show') && !document.getElementById('nsuPriceEditPop')){
+      var s = document.getElementById('nsuSearch');
+      var active = document.activeElement;
+      var tag = active ? active.tagName.toLowerCase() : '';
+      // โฟกัสเฉพาะถ้าไม่ได้พิมพ์ในช่องอื่น
+      if(s && tag!=='input' && tag!=='select' && tag!=='textarea'){ s.focus(); }
+    }
+  };
+})();
+
+// ===== 2. ลิ้นชักเปิดอัตโนมัติ (บังคับ autoDrawer เปิดครั้งแรก) =====
+(function forceAutoDrawer(){
+  function run(){
+    try {
+      var MIGRATED = 'pos_autodrawer_on_v1';
+      if(!localStorage.getItem(MIGRATED)){
+        if(typeof prCfg!=='undefined'){ prCfg.autoDrawer = true; }
+        var cb = document.getElementById('autoDrawer');
+        if(cb){ cb.checked = true; }
+        try {
+          var cfg = JSON.parse(localStorage.getItem('pos_printer_v3')||'{}');
+          cfg.autoDrawer = true;
+          localStorage.setItem('pos_printer_v3', JSON.stringify(cfg));
+        } catch(e){}
+        localStorage.setItem(MIGRATED, '1');
+      }
+    } catch(e){}
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 600);
 })();
 
 
