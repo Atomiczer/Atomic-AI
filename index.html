@@ -13411,6 +13411,71 @@ window.nsuSearchKey = function(e){
 };
 
 
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 44: แก้พิมพ์ไม่ขึ้น (iframe ที่ Chrome ยอมพิมพ์)
+// ============================================================
+// ปัญหา: iframe 0x0 / ซ่อน บาง Chrome ไม่ยอมพิมพ์
+// แก้: iframe มีขนาดจริงแต่วางใต้จอ (ไม่ 0x0) + รอ content โหลดแน่นอน
+
+window.printViaIframe = function(htmlContent){
+  // ตัด script tag ออก (กันตีกัน)
+  var _stag = String.fromCharCode(60)+'script';
+  var _etag = String.fromCharCode(60)+'/script'+String.fromCharCode(62);
+  var cleanHtml = htmlContent.replace(new RegExp(_stag+'[\\s\\S]*?'+_etag,'gi'), '');
+
+  // ลบ iframe เก่า
+  var old = document.getElementById('printFrame');
+  if(old) old.remove();
+
+  var iframe = document.createElement('iframe');
+  iframe.id = 'printFrame';
+  // ขนาดจริง แต่วางนอกจอ (Chrome ยอมพิมพ์ iframe ที่มีขนาด)
+  iframe.style.cssText = 'position:fixed;width:380px;height:600px;left:-10000px;top:0;border:0;z-index:-1;';
+  document.body.appendChild(iframe);
+
+  var doc = iframe.contentWindow.document;
+  doc.open();
+  doc.write(cleanHtml);
+  doc.close();
+
+  var printed = false;
+  function doPrint(){
+    if(printed) return;
+    printed = true;
+    try {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+    } catch(e){
+      console.warn('iframe print error, fallback popup', e);
+      // fallback: เปิด popup ปกติ
+      try {
+        var w = (window._nativeWindowOpen||window.open)('','_blank','width=400,height=600');
+        if(w){ w.document.write(htmlContent); w.document.close(); }
+      } catch(e2){}
+    }
+    setTimeout(function(){ if(iframe && iframe.parentNode) iframe.remove(); }, 3000);
+  }
+
+  // รอ content โหลดจริง (รูป/บาร์โค้ด) แล้วค่อยพิมพ์
+  iframe.onload = function(){ setTimeout(doPrint, 400); };
+  // สำรอง (ถ้า onload ไม่ยิง)
+  setTimeout(doPrint, 800);
+};
+
+// ทดสอบ: เพิ่ม log ว่า printReceipt ถูกเรียกไหม
+(function verifyPrintCall(){
+  var _orig = window.printReceipt;
+  if(typeof _orig==='function'){
+    window.printReceipt = function(){
+      console.log('[POS] printReceipt ถูกเรียก');
+      return _orig.apply(this, arguments);
+    };
+  }
+})();
+
+
 </script>
 
 
