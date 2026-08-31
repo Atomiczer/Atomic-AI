@@ -962,7 +962,10 @@
       <button class="pay-btn pay-cash" onclick="openPayment('cash')">💵 ชำระเงินสด</button>
       <button class="pay-btn pay-qr" onclick="openPayment('qr')">📱 QR / พร้อมเพย์</button>
       <button class="pay-btn pay-credit" onclick="openPayment('credit')">💳 บัตรเครดิต/เดบิต</button>
-      <button class="pay-btn pay-split" onclick="openPayment('split')">⚡ แยกชำระ</button>
+      <div style="display:flex;gap:6px">
+        <button class="pay-btn pay-split" style="flex:1" onclick="openPayment('split')">⚡ แยกชำระ</button>
+        <button class="pay-btn pay-welfare" style="flex:1;background:linear-gradient(135deg,#00897b,#4db6ac);color:#fff" onclick="openPayment('welfare')">🎫 บัตรสวัสดิการ</button>
+      </div>
     </div>
   </div>
 </div>
@@ -12219,6 +12222,1195 @@ window.printViaIframe = function(htmlContent){
 })();
 
 
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 31: topbar ใหญ่, ราคารวมใหญ่, บัตรสวัสดิการ, F12
+// ============================================================
+
+// ==================== ข้อ 3: บัตรสวัสดิการ (welfare) ====================
+var _origOpenPayment31 = window.openPayment;
+window.openPayment = function(method){
+  if(method==='welfare'){
+    if(!order.length) return;
+    currentPayMethod = 'welfare';
+    var total = getTotal();
+    var f = fmt(total);
+    var vatNote = isVatOn()?'(รวม VAT 7%)':'(ไม่รวม VAT)';
+    showConfirm('ชำระด้วยบัตรสวัสดิการ','ยืนยันชำระด้วยบัตรสวัสดิการแห่งรัฐ '+f+' '+vatNote,'🎫','ยืนยัน','').then(function(ok){
+      if(ok) confirmPayment('welfare');
+    });
+    return;
+  }
+  _origOpenPayment31.apply(this, arguments);
+};
+
+// ==================== ข้อ 5: F12 = ล้างออเดอร์ ====================
+document.addEventListener('keydown', function(e){
+  if(e.key==='F12'){
+    // เฉพาะเมื่อไม่มี modal เปิด และไม่ได้พิมพ์ในช่อง
+    var anyModal = document.querySelector('.modal-overlay.show');
+    if(anyModal) return;
+    var active = document.activeElement;
+    var tag = active ? active.tagName.toLowerCase() : '';
+    if(tag==='input'||tag==='textarea') return;
+    e.preventDefault();
+    if(order && order.length){
+      if(typeof clearOrder==='function') clearOrder();
+    }
+  }
+}, true); // capture phase (ชิงก่อน browser devtools ถ้าทำได้)
+
+// ==================== ข้อ 2: ราคารวมใหญ่ + เขียวเข้ม (ปรับขนาดได้) ====================
+var SK_TOTAL_SIZE = 'pos_total_font_size';
+function loadTotalSize(){ var s=localStorage.getItem(SK_TOTAL_SIZE); return s?parseInt(s):48; }
+function saveTotalSize(px){ localStorage.setItem(SK_TOTAL_SIZE, px); }
+
+function applyTotalSize(){
+  var px = loadTotalSize();
+  var totalRow = document.querySelector('.summary-row.total');
+  if(totalRow){
+    totalRow.style.fontSize = px + 'px';
+    totalRow.style.fontWeight = '800';
+    totalRow.style.color = '#1b5e20'; // เขียวเข้ม
+    var spans = totalRow.querySelectorAll('span');
+    spans.forEach(function(s){ s.style.color='#1b5e20'; s.style.fontWeight='800'; });
+  }
+}
+
+// เพิ่มปุ่มปรับขนาดในแท็บหน้าตา (theme)
+function buildTotalSizeSection(){
+  var px = loadTotalSize();
+  return '<div class="prod-form" style="margin-top:12px"><h4>💰 ขนาดตัวเลขรวมทั้งสิ้น</h4>'
+    + '<div style="display:flex;align-items:center;gap:10px">'
+    + '<button onclick="totalSizeStep(-4)" style="width:36px;height:36px;border:1.5px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;font-size:18px">−</button>'
+    + '<span id="totalSizeLabel" style="font-size:14px;font-weight:700;min-width:70px;text-align:center">'+px+'px</span>'
+    + '<button onclick="totalSizeStep(4)" style="width:36px;height:36px;border:1.5px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;font-size:18px">+</button>'
+    + '<span style="font-size:11px;color:var(--text-muted);margin-left:8px">(ยอดรวมทั้งสิ้นในหน้าขาย)</span>'
+    + '</div></div>';
+}
+function totalSizeStep(delta){
+  var px = Math.max(20, Math.min(96, loadTotalSize()+delta));
+  saveTotalSize(px);
+  var label = document.getElementById('totalSizeLabel');
+  if(label) label.textContent = px+'px';
+  applyTotalSize();
+}
+
+// hook calcTotal ให้คงขนาดใหญ่ไว้เสมอ
+(function hookCalcTotalSize(){
+  var _orig = window.calcTotal;
+  if(typeof _orig==='function'){
+    window.calcTotal = function(){ _orig.apply(this,arguments); applyTotalSize(); };
+  }
+})();
+
+// hook renderThemePane เพิ่มส่วนปรับขนาด
+(function hookThemeTotalSize(){
+  var _orig = window.renderThemePane;
+  if(typeof _orig==='function'){
+    window.renderThemePane = function(){
+      _orig.apply(this,arguments);
+      var pane = document.getElementById('stPane-theme');
+      if(!pane) return;
+      var holder = document.getElementById('totalSizeHolder');
+      if(!holder){ holder=document.createElement('div'); holder.id='totalSizeHolder'; pane.appendChild(holder); }
+      holder.innerHTML = buildTotalSizeSection();
+    };
+  }
+})();
+
+// apply ตอนโหลด
+(function initTotalSize(){
+  function run(){ applyTotalSize(); }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 600);
+})();
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 32: หน้าสต๊อก+จัดการสินค้า ไม่โชว์ 6000 รายการ
+// ============================================================
+// แสดงเฉพาะเมื่อค้นหา (ไม่ค้นหา = แสดงข้อความแนะนำ) → เร็วขึ้นมาก
+
+// ---------- จัดการสินค้า ----------
+window.renderProdTable = function(){
+  var tbody = document.getElementById('prodTableBody');
+  if(!tbody) return;
+  var searchEl = document.getElementById('pmSearchInput');
+  var kw = searchEl ? searchEl.value.trim().toLowerCase() : '';
+
+  if(!kw){
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-muted)">'
+      + '🔍 มีสินค้า <b>'+PRODUCTS.length+'</b> รายการ<br>'
+      + '<span style="font-size:12px">พิมพ์ค้นหาชื่อสินค้าหรือบาร์โค้ดด้านบน เพื่อแสดงรายการ</span></td></tr>';
+    return;
+  }
+  renderProdTableFiltered(kw);
+};
+
+function renderProdTableFiltered(kw){
+  var tbody = document.getElementById('prodTableBody');
+  var matches = [];
+  for(var i=0;i<PRODUCTS.length && matches.length<100;i++){
+    var p = PRODUCTS[i];
+    if(p.name.toLowerCase().indexOf(kw)!==-1 || (p.barcode && p.barcode.indexOf(kw)!==-1)){
+      matches.push(p);
+    }
+  }
+  if(!matches.length){
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text-muted)">ไม่พบสินค้าที่ตรงกับ "'+kw+'"</td></tr>';
+    return;
+  }
+  tbody.innerHTML = matches.map(function(p){
+    return '<tr><td>'+p.name+'</td><td>'+p.cat+'</td><td style="font-weight:600;color:var(--primary)">฿'+p.price+'</td><td>'+p.stock+'</td>'
+      +'<td class="barcode-cell">'+(p.barcode?p.barcode:'<span style="color:#ccc">—</span>')+'</td>'
+      +'<td style="display:flex;gap:4px">'
+      +'<button class="btn-sm btn-edit" onclick="editProduct('+p.id+')" style="white-space:nowrap">แก้ไข</button>'
+      +'<button class="btn-sm" style="white-space:nowrap;background:'+(p.visible!==false?'#e8f5e9':'#ffebee')+';color:'+(p.visible!==false?'#2e7d32':'#c62828')+'" onclick="toggleProductVisible('+p.id+')">'+(p.visible!==false?'แสดง':'ซ่อน')+'</button>'
+      +'<button class="btn-sm btn-del" onclick="deleteProduct('+p.id+')" style="white-space:nowrap">ลบ</button>'
+      +'</td></tr>';
+  }).join('') + (matches.length>=100?'<tr><td colspan="6" style="text-align:center;padding:8px;color:var(--text-muted);font-size:11px">แสดง 100 รายการแรก — ค้นหาให้เจาะจงขึ้น</td></tr>':'');
+}
+
+window.filterProdTable = function(keyword){
+  var kw = (keyword||'').trim().toLowerCase();
+  if(!kw){ renderProdTable(); return; }
+  renderProdTableFiltered(kw);
+};
+
+// ---------- สต๊อก ----------
+window.renderStockTable = function(){
+  var low=0, out=0;
+  for(var i=0;i<PRODUCTS.length;i++){ if(PRODUCTS[i].stock>0&&PRODUCTS[i].stock<=5)low++; if(PRODUCTS[i].stock===0)out++; }
+  var te=document.getElementById('stk-total'); if(te) te.textContent=PRODUCTS.length;
+  var le=document.getElementById('stk-low'); if(le) le.textContent=low;
+  var oe=document.getElementById('stk-out'); if(oe) oe.textContent=out;
+
+  var tbody = document.getElementById('stockTableBody');
+  if(!tbody) return;
+  var searchEl = document.getElementById('stockSearchInput');
+  var kw = searchEl ? searchEl.value.trim().toLowerCase() : '';
+  if(!kw){
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-muted)">'
+      + '📦 มีสินค้า <b>'+PRODUCTS.length+'</b> รายการ · เหลือน้อย <b>'+low+'</b> · หมด <b>'+out+'</b><br>'
+      + '<span style="font-size:12px">พิมพ์ค้นหาด้านบน เพื่อแก้ไขสต๊อกรายการนั้น</span></td></tr>';
+    return;
+  }
+  renderStockTableFiltered(kw);
+};
+
+function renderStockTableFiltered(kw){
+  var tbody = document.getElementById('stockTableBody');
+  var matches = [];
+  for(var i=0;i<PRODUCTS.length && matches.length<100;i++){
+    var p = PRODUCTS[i];
+    if(p.name.toLowerCase().indexOf(kw)!==-1 || (p.barcode && p.barcode.indexOf(kw)!==-1)) matches.push(p);
+  }
+  if(!matches.length){
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text-muted)">ไม่พบสินค้า</td></tr>';
+    return;
+  }
+  tbody.innerHTML = matches.map(function(p){
+    var sc=getStockClass(p.stock);
+    var label=sc==='out'?'หมด':sc==='low'?'เหลือน้อย':'ปกติ';
+    var bc=sc==='out'?'out':sc==='low'?'low':'ok';
+    return '<tr><td>'+p.name+'</td><td>฿'+p.price+'</td><td style="font-weight:600;color:'+(sc==='out'?'var(--danger)':sc==='low'?'#f57f17':'var(--text)')+'">'+p.stock+'</td><td><input class="stock-qty-input" type="number" id="si_'+p.id+'" value="'+p.stock+'" min="0" max="9999"></td><td><span class="stock-badge '+bc+'">'+label+'</span></td><td><button class="stock-save-btn" onclick="saveSingleStock('+p.id+')">บันทึก</button></td></tr>';
+  }).join('') + (matches.length>=100?'<tr><td colspan="6" style="text-align:center;padding:8px;color:var(--text-muted);font-size:11px">แสดง 100 รายการแรก</td></tr>':'');
+}
+
+window.filterStockTable = function(keyword){
+  var kw = (keyword||'').trim().toLowerCase();
+  var infoEl = document.getElementById('stockSearchInfo');
+  if(!kw){ renderStockTable(); if(infoEl) infoEl.textContent=''; return; }
+  renderStockTableFiltered(kw);
+  if(infoEl) infoEl.textContent='';
+};
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 33: แก้สแกนบาร์โค้ดมือถือ (ZXing CDN)
+// ============================================================
+// ปัญหา: iPhone/Safari ไม่มี BarcodeDetector → ใช้ ZXing แต่ CDN เดิม path ผิด
+// แก้: ใช้ CDN ที่ถูกต้อง (@zxing/library UMD) + สำรองหลายตัว
+
+window.loadZxing = function(){
+  return new Promise(function(resolve, reject){
+    if(window.ZXing){ resolve(); return; }
+    // รายการ CDN สำรอง (ลองทีละตัว)
+    var cdns = [
+      'https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js',
+      'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js',
+      'https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js',
+      'https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js'
+    ];
+    var idx = 0;
+    function tryNext(){
+      if(idx>=cdns.length){ reject(new Error('โหลด ZXing ไม่ได้ทุก CDN')); return; }
+      var script = document.createElement('script');
+      script.src = cdns[idx];
+      script.onload = function(){
+        // เช็คว่า ZXing โหลดจริง
+        if(window.ZXing && window.ZXing.BrowserMultiFormatReader){ resolve(); }
+        else { idx++; tryNext(); }
+      };
+      script.onerror = function(){ idx++; tryNext(); };
+      document.head.appendChild(script);
+    }
+    tryNext();
+  });
+};
+
+// เขียน scanLoopZxing ใหม่ให้ใช้ decodeFromVideoDevice (เสถียรกว่าบนมือถือ)
+window.scanLoopZxing = function(){
+  if(!camScanning) return;
+  var modeEl = document.getElementById('camScanMode');
+  if(!window.ZXing || !window.ZXing.BrowserMultiFormatReader){
+    if(modeEl) modeEl.textContent='โหลดตัวอ่านบาร์โค้ดไม่ได้ — ใช้ "กรอกเอง"';
+    return;
+  }
+  if(modeEl) modeEl.textContent = 'โหมด: ZXing (มือถือ)';
+  try {
+    if(!camZxingReader){
+      camZxingReader = new ZXing.BrowserMultiFormatReader();
+    }
+    var video = document.getElementById('scannerVideo');
+    // ใช้ decodeFromVideoElement (ใช้ stream ที่เปิดไว้แล้ว)
+    camZxingReader.decodeFromVideoElement(video, function(result, err){
+      if(result && camScanning){
+        onCamScanned(result.getText ? result.getText() : result.text);
+      }
+    });
+  } catch(e){
+    if(modeEl) modeEl.textContent = 'ZXing error: '+e.message;
+  }
+};
+
+// ปรับ startCamScanImproved: บนมือถือ (ไม่มี BarcodeDetector) โหลด ZXing ก่อนเริ่ม
+var _origStartImproved = window.startCamScanImproved;
+window.startCamScanImproved = async function(){
+  // ถ้าไม่มี BarcodeDetector (iPhone) โหลด ZXing ล่วงหน้า
+  if(!('BarcodeDetector' in window) && !window.ZXing){
+    var statusEl = document.getElementById('camScanStatus');
+    if(statusEl) statusEl.textContent = 'กำลังโหลดตัวอ่านบาร์โค้ด (ครั้งแรกอาจช้า)...';
+    try { await loadZxing(); } catch(e){}
+  }
+  return _origStartImproved.apply(this, arguments);
+};
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 34: ข้อ 6 ลบตัวเลือกที่ไม่ใช้ในแท็บหน้าตา
+// ============================================================
+// เก็บ: ปกติ(การ์ดใหญ่), ขยายพื้นที่บิล, เลขลำดับรายการ
+// ลบ: กะทัดรัด, รายการ, ตาราง(Cashier), สไตล์ Rango
+
+// บังคับ density = comfortable เสมอ (โหมดเดียวที่ใช้)
+(function forceComfortable(){
+  try {
+    if(typeof displayMode!=='undefined'){
+      displayMode.density = 'comfortable';
+      if(typeof saveDisplayMode==='function') saveDisplayMode(displayMode);
+    }
+    // ลบ class density อื่นออกจาก body
+    document.body.classList.remove('density-compact','density-dense','density-table');
+  } catch(e){}
+})();
+
+// override buildDisplayModeSection ให้เหลือแค่ตัวที่ใช้
+window.buildDisplayModeSection = function(){
+  var dm = (typeof displayMode!=='undefined') ? displayMode : { wideOrder:false, numbered:false };
+  return '<div class="prod-form" style="margin-top:12px"><h4>🖥️ มุมมองหน้าขาย</h4>'
+    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">ปรับการแสดงผลหน้าขาย</div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+    + '  <label style="flex:1;min-width:140px;display:flex;align-items:center;gap:8px;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;cursor:pointer;font-size:12px">'
+    + '    <input type="checkbox" '+(dm.wideOrder?'checked':'')+' onchange="toggleWideOrder()" style="accent-color:var(--primary);width:16px;height:16px">↔ ขยายพื้นที่บิล</label>'
+    + '  <label style="flex:1;min-width:140px;display:flex;align-items:center;gap:8px;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;cursor:pointer;font-size:12px">'
+    + '    <input type="checkbox" '+(dm.numbered?'checked':'')+' onchange="toggleNumbered()" style="accent-color:var(--primary);width:16px;height:16px">#️⃣ เลขลำดับรายการ</label>'
+    + '</div></div>';
+};
+
+// เอาแถบ densityBar (ปุ่มปกติ/กะทัดรัด/รายการ) ออกจากหน้าขาย — ถ้ายังมี
+(function removeDensityBar(){
+  function run(){
+    var bar = document.getElementById('densityBar');
+    if(bar) bar.remove();
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 500);
+})();
+
+// ปิดฟังก์ชัน setDensity (กันเรียกโหมดที่ลบไป)
+window.setDensity = function(d){
+  // อนุญาตแค่ comfortable
+  if(typeof displayMode!=='undefined'){
+    displayMode.density='comfortable';
+    if(typeof saveDisplayMode==='function') saveDisplayMode(displayMode);
+  }
+  document.body.classList.remove('density-compact','density-dense','density-table');
+  if(typeof renderProducts==='function') renderProducts();
+};
+
+// ปิดสไตล์ Rango (ถ้าเคยเปิด)
+(function disableRango(){
+  try {
+    if(typeof setRangoMode==='function') setRangoMode(false);
+    var big = document.getElementById('rangoBigTotal'); if(big) big.remove();
+    var enter = document.getElementById('rangoEnterPay'); if(enter) enter.remove();
+  } catch(e){}
+})();
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 35: หน้าขายใหม่ แบบร้านปลีก-ส่ง (โหมดเสริม สลับได้)
+// ============================================================
+
+var SK_NEWUI = 'pos_newui_enabled';
+function isNewUI(){ return localStorage.getItem(SK_NEWUI)==='1'; }
+function setNewUI(on){ localStorage.setItem(SK_NEWUI, on?'1':'0'); }
+
+// สร้าง overlay หน้าขายใหม่
+function buildNewSellUI(){
+  if(document.getElementById('newSellUI')) return;
+  var ov = document.createElement('div');
+  ov.id = 'newSellUI';
+  ov.innerHTML = ''
+    + '<div class="nsu-topbar">'
+    + '  <span class="nsu-brand"><i class="ti ti-building-store"></i> AB SHOP · ค้าปลีก-ส่ง</span>'
+    + '  <div class="nsu-topbtns">'
+    + '    <button onclick="holdOrder();nsuRefresh()"><i class="ti ti-player-pause"></i> พักบิล</button>'
+    + '    <button onclick="openHold()"><i class="ti ti-clock"></i> พัก</button>'
+    + '    <button onclick="openProductManager()"><i class="ti ti-box"></i> สินค้า</button>'
+    + '    <button onclick="openStockManager()"><i class="ti ti-stack-2"></i> สต๊อก</button>'
+    + '    <button onclick="openPromoManager()"><i class="ti ti-gift"></i> โปรโมชั่น</button>'
+    + '    <button onclick="openReturnModal()"><i class="ti ti-arrow-back"></i> รับคืน</button>'
+    + '    <button onclick="openCloudSyncModal()"><i class="ti ti-cloud"></i> ซิงค์</button>'
+    + '    <button onclick="openReport()"><i class="ti ti-chart-bar"></i> รายงาน</button>'
+    + '    <button onclick="openSettings()"><i class="ti ti-settings"></i> ตั้งค่า</button>'
+    + '    <button onclick="toggleNewUI(false)" style="background:rgba(255,255,255,0.28)"><i class="ti ti-arrow-back-up"></i> หน้าเดิม</button>'
+    + '  </div>'
+    + '</div>'
+    + '<div class="nsu-body">'
+    + '  <div class="nsu-left">'
+    + '    <div class="nsu-search"><i class="ti ti-scan"></i><input id="nsuSearch" placeholder="ยิงบาร์โค้ด / ค้นหาสินค้า" oninput="nsuSearchInput()" onkeydown="nsuSearchKey(event)"></div>'
+    + '    <div class="nsu-pricetier">'
+    + '      <span>ระดับราคา</span>'
+    + '      <div class="nsu-tierbtns">'
+    + '        <button data-tier="retail" class="active" onclick="nsuSetTier(\'retail\')">ปลีก</button>'
+    + '        <button data-tier="wholesale" onclick="nsuSetTier(\'wholesale\')">ส่ง</button>'
+    + '        <button data-tier="vip" onclick="nsuSetTier(\'vip\')">VIP</button>'
+    + '      </div>'
+    + '    </div>'
+    + '    <div class="nsu-prodwrap" id="nsuProdList"></div>'
+    + '  </div>'
+    + '  <div class="nsu-right">'
+    + '    <div class="nsu-total">'
+    + '      <div class="nsu-total-meta" id="nsuTotalMeta">0 รายการ · 0 ชิ้น</div>'
+    + '      <div class="nsu-total-label">ยอดสุทธิ</div>'
+    + '      <div class="nsu-total-amt" id="nsuTotalAmt">฿0.00</div>'
+    + '    </div>'
+    + '    <div class="nsu-ordertable">'
+    + '      <div class="nsu-order-head"><span>#</span><span>สินค้า</span><span>ราคา</span><span>จำนวน</span><span>รวม</span><span></span></div>'
+    + '      <div id="nsuOrderRows"></div>'
+    + '    </div>'
+    + '    <div id="nsuSummary" class="nsu-summary"></div>'
+    + '    <div class="nsu-paybtns">'
+    + '      <button class="nsu-pay-cash" onclick="openPayment(\'cash\')"><i class="ti ti-cash"></i> เงินสด</button>'
+    + '      <button class="nsu-pay-qr" onclick="openPayment(\'qr\')">QR</button>'
+    + '      <button class="nsu-pay-split" onclick="openPayment(\'split\')">แยก</button>'
+    + '      <button class="nsu-pay-welfare" onclick="openPayment(\'welfare\')">สวัสดิการ</button>'
+    + '    </div>'
+    + '  </div>'
+    + '</div>';
+  document.body.appendChild(ov);
+}
+
+// render สินค้าในหน้าใหม่ (ปักหมุด หรือผลค้นหา)
+function nsuRenderProducts(searchVal){
+  var wrap = document.getElementById('nsuProdList');
+  if(!wrap) return;
+  var kw = (searchVal||'').trim().toLowerCase();
+  var list = [];
+  if(kw){
+    for(var i=0;i<PRODUCTS.length && list.length<40;i++){
+      var p=PRODUCTS[i];
+      if(p.visible!==false && (p.name.toLowerCase().indexOf(kw)!==-1 || (p.barcode&&p.barcode.indexOf(kw)!==-1))) list.push(p);
+    }
+  } else {
+    // ปักหมุด (ใช้ pinnedIds จาก Part 26 ถ้ามี)
+    if(typeof pinnedIds!=='undefined' && pinnedIds.length){
+      list = pinnedIds.map(function(id){return PRODUCTS.find(function(p){return p.id===id&&p.visible!==false;});}).filter(Boolean);
+    } else {
+      list = PRODUCTS.filter(function(p){return p.visible!==false;}).slice(0,20);
+    }
+  }
+  if(!list.length){
+    wrap.innerHTML = '<div class="nsu-empty">'+(kw?'ไม่พบสินค้า':'พิมพ์ค้นหา หรือยิงบาร์โค้ด')+'</div>';
+    return;
+  }
+  wrap.innerHTML = '<div class="nsu-prodgrid">' + list.map(function(p){
+    return '<div class="nsu-pcard'+(p.stock<=0?' out':'')+'" onclick="addToOrder('+p.id+');nsuRefresh()">'
+      + '<div class="nsu-pname">'+p.name+'</div>'
+      + '<div class="nsu-pprice">฿'+p.price+'</div>'
+      + '<div class="nsu-pstock">คงเหลือ '+p.stock+'</div>'
+      + '</div>';
+  }).join('') + '</div>';
+}
+
+// render รายการออเดอร์ในหน้าใหม่
+function nsuRenderOrder(){
+  var rows = document.getElementById('nsuOrderRows');
+  if(!rows) return;
+  if(!order.length){
+    rows.innerHTML = '<div class="nsu-empty">ยังไม่มีสินค้า — ยิงบาร์โค้ดหรือกดเลือก</div>';
+  } else {
+    rows.innerHTML = order.map(function(item,i){
+      return '<div class="nsu-order-row">'
+        + '<span>'+(i+1)+'</span>'
+        + '<span class="nsu-oname">'+item.name+'</span>'
+        + '<span class="nsu-oprice">'+item.price+'</span>'
+        + '<span class="nsu-oqty"><button onclick="changeQty('+item.id+',-1);nsuRefresh()">−</button>'+item.qty+'<button onclick="changeQty('+item.id+',1);nsuRefresh()">+</button></span>'
+        + '<span class="nsu-ototal">'+(item.price*item.qty).toLocaleString()+'</span>'
+        + '<span><button class="nsu-odel" onclick="removeItem('+item.id+');nsuRefresh()"><i class="ti ti-x"></i></button></span>'
+        + '</div>';
+    }).join('');
+  }
+  // total + meta
+  var total = getTotal();
+  var totalQty = order.reduce(function(s,i){return s+i.qty;},0);
+  var amtEl = document.getElementById('nsuTotalAmt');
+  var metaEl = document.getElementById('nsuTotalMeta');
+  if(amtEl) amtEl.textContent = fmt(total);
+  if(metaEl) metaEl.textContent = order.length+' รายการ · '+totalQty+' ชิ้น';
+}
+
+function nsuRefresh(){ nsuRenderOrder(); nsuRenderProducts(document.getElementById('nsuSearch') ? document.getElementById('nsuSearch').value : ''); }
+
+function nsuSearchInput(){ nsuRenderProducts(document.getElementById('nsuSearch').value); }
+
+function nsuSearchKey(e){
+  if(e.key==='Enter'){
+    var val = e.target.value.trim();
+    if(typeof convertThaiBarcodeToDigits==='function'){
+      var conv = convertThaiBarcodeToDigits(val);
+      if(conv!==val && /^[0-9]+$/.test(conv)){ e.target.value=conv; val=conv; }
+    }
+    if(val.length>=4){
+      var found = PRODUCTS.find(function(p){return p.barcode===val;});
+      if(found){ addToOrder(found.id); showToast('เพิ่ม '+found.name); e.target.value=''; nsuRefresh(); return; }
+    }
+  }
+}
+
+function nsuSetTier(tier){
+  currentPriceTier = tier;
+  // อัปเดตปุ่ม active
+  document.querySelectorAll('#newSellUI .nsu-tierbtns button').forEach(function(b){
+    b.className = (b.getAttribute('data-tier')===tier)?'active':'';
+  });
+  // อัปเดตราคาสินค้าในออเดอร์ (เหมือน changePriceTier เดิม)
+  order.forEach(function(item){
+    var p = PRODUCTS.find(function(x){return x.id===item.id;});
+    if(!p) return;
+    if(tier==='wholesale' && p.priceWholesale>0) item.price=p.priceWholesale;
+    else if(tier==='vip' && p.priceVip>0) item.price=p.priceVip;
+    else item.price = p.priceRetail||p.price;
+  });
+  // sync กับ dropdown เดิม (ถ้ามี)
+  var sel = document.getElementById('pricetier');
+  if(sel){ sel.value = tier; }
+  if(typeof calcTotal==='function') calcTotal();
+  nsuRefresh();
+  showToast('ราคา'+(tier==='wholesale'?'ส่ง':tier==='vip'?'VIP':'ปลีก'));
+}
+
+function toggleNewUI(on){
+  setNewUI(on);
+  var ov = document.getElementById('newSellUI');
+  if(on){
+    if(!ov){ buildNewSellUI(); ov=document.getElementById('newSellUI'); }
+    ov.style.display = 'flex';
+    document.body.classList.add('newui-active');
+    nsuRefresh();
+  } else {
+    if(ov) ov.style.display = 'none';
+    document.body.classList.remove('newui-active');
+  }
+}
+
+// hook renderOrder เดิม ให้ sync กับหน้าใหม่ด้วย
+(function hookRenderOrderNsu(){
+  var _orig = window.renderOrder;
+  window.renderOrder = function(){
+    _orig.apply(this, arguments);
+    if(isNewUI() && document.getElementById('newSellUI')) nsuRenderOrder();
+  };
+})();
+
+// ปุ่มเปิดหน้าใหม่ใน topbar เดิม
+(function injectNewUIButton(){
+  function run(){
+    var topRight = document.querySelector('.topbar-right');
+    if(!topRight || document.getElementById('newUIBtn')) return;
+    var btn = document.createElement('button');
+    btn.id = 'newUIBtn';
+    btn.className = 'tb-btn';
+    btn.style.cssText = 'background:#0F6E56 !important;color:#fff';
+    btn.innerHTML = '🏪 หน้าปลีก-ส่ง';
+    btn.onclick = function(){ toggleNewUI(true); };
+    topRight.insertBefore(btn, topRight.firstChild);
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 500);
+})();
+
+// เปิดอัตโนมัติถ้าเคยเปิดไว้
+(function autoOpenNewUI(){
+  function run(){ if(isNewUI()){ toggleNewUI(true); } }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 800);
+})();
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 36: หน้าปลีก-ส่ง เวอร์ชันเต็ม
+// ============================================================
+// เพิ่ม: ลูกค้า, ส่วนลด, คูปอง, VAT, โน้ต, พักบิล, แต้ม/โปรโมชั่น
+// วิธี: ผูกกับ element เดิม (calcTotal/applyCoupon เดิมทำงานได้เลย)
+
+// สร้างแผงควบคุมเต็มในหน้าใหม่ (แทรกก่อนปุ่มชำระ)
+function nsuBuildFullControls(){
+  var right = document.querySelector('#newSellUI .nsu-right');
+  if(!right || document.getElementById('nsuControls')) return;
+
+  var payBtns = right.querySelector('.nsu-paybtns');
+  var ctrl = document.createElement('div');
+  ctrl.id = 'nsuControls';
+  ctrl.innerHTML = ''
+    + '<div class="nsu-ctrl-row">'
+    + '  <div class="nsu-ctrl-field"><label>ลูกค้า</label>'
+    + '    <select id="nsuCustomer" onchange="nsuSetCustomerNew()"></select></div>'
+    + '</div>'
+    + '<div class="nsu-ctrl-row">'
+    + '  <div class="nsu-ctrl-field" style="flex:1.3"><label>ส่วนลด</label>'
+    + '    <div style="display:flex;gap:4px">'
+    + '      <input type="number" id="nsuDiscount" value="0" min="0" oninput="nsuSetDiscount()" style="flex:1;min-width:0">'
+    + '      <select id="nsuDiscountType" onchange="nsuSetDiscount()" style="width:52px;flex-shrink:0;padding:7px 4px"><option value="baht">฿</option><option value="percent">%</option></select>'
+    + '    </div></div>'
+    + '  <div class="nsu-ctrl-field" style="flex:1.5"><label>คูปอง</label>'
+    + '    <div style="display:flex;gap:4px">'
+    + '      <input type="text" id="nsuCoupon" placeholder="โค้ด" style="flex:1;min-width:0;text-transform:uppercase" onkeydown="if(event.key===\'Enter\')nsuApplyCouponNew()">'
+    + '      <button onclick="nsuApplyCouponNew()" class="nsu-mini-btn">ใช้</button>'
+    + '      <button onclick="if(order.length){clearOrder();nsuRefresh();}" class="nsu-clear-btn2" title="ล้างบิล">ล้างบิล</button>'
+    + '    </div></div>'
+    + '</div>'
+    + '<div class="nsu-ctrl-row nsu-vat-row">'
+    + '  <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">'
+    + '    <input type="checkbox" id="nsuVat" onchange="nsuSetVat()" style="width:18px;height:18px;accent-color:#185FA5"> ภาษี VAT 7%</label>'
+    + '  <span id="nsuVatAmt" style="font-size:13px;color:#666"></span>'
+    + '</div>'
+    + '<div id="nsuPromoArea"></div>';
+  right.insertBefore(ctrl, payBtns);
+
+  nsuPopulateCustomers();
+}
+
+// เติมรายชื่อลูกค้า (ก๊อปจาก customerSelect เดิม)
+function nsuPopulateCustomers(){
+  var orig = document.getElementById('customerSelect');
+  var nsu = document.getElementById('nsuCustomer');
+  if(orig && nsu){ nsu.innerHTML = orig.innerHTML; nsu.value = orig.value; }
+}
+
+// sync ลูกค้า → element เดิม → calcTotal
+function nsuSyncCustomer(){
+  var orig = document.getElementById('customerSelect');
+  var nsu = document.getElementById('nsuCustomer');
+  if(orig && nsu){ orig.value = nsu.value; orig.dispatchEvent(new Event('change')); }
+  nsuRefresh();
+}
+
+// sync ส่วนลด → element เดิม → calcTotal
+function nsuSyncDiscount(){
+  var od = document.getElementById('discountVal');
+  var ot = document.getElementById('discountType');
+  var nd = document.getElementById('nsuDiscount');
+  var nt = document.getElementById('nsuDiscountType');
+  if(od && nd){ od.value = nd.value; }
+  if(ot && nt){ ot.value = nt.value; }
+  if(typeof calcTotal==='function') calcTotal();
+  nsuRefresh();
+}
+
+// คูปอง → ใช้ applyCoupon เดิม
+function nsuApplyCoupon(){
+  var oc = document.getElementById('couponInput');
+  var nc = document.getElementById('nsuCoupon');
+  if(oc && nc){ oc.value = nc.value; if(typeof applyCoupon==='function') applyCoupon(); }
+  if(typeof calcTotal==='function') calcTotal();
+  nsuRefresh();
+}
+
+// VAT → sync toggle เดิม
+function nsuSyncVat(){
+  var ov = document.getElementById('vatToggle');
+  var nv = document.getElementById('nsuVat');
+  if(ov && nv){ ov.checked = nv.checked; if(typeof calcTotal==='function') calcTotal(); }
+  nsuRefresh();
+}
+
+// อัปเดตค่าในแผงควบคุมจาก state จริง
+function nsuSyncControlsFromState(){
+  // VAT
+  var ov = document.getElementById('vatToggle');
+  var nv = document.getElementById('nsuVat');
+  if(ov && nv) nv.checked = ov.checked;
+  var vatAmtEl = document.getElementById('vatAmt');
+  var nsuVatAmt = document.getElementById('nsuVatAmt');
+  if(vatAmtEl && nsuVatAmt) nsuVatAmt.textContent = ov && ov.checked ? vatAmtEl.textContent : 'ปิด';
+  // ส่วนลด
+  var od = document.getElementById('discountVal');
+  var nd = document.getElementById('nsuDiscount');
+  if(od && nd && document.activeElement!==nd) nd.value = od.value;
+  // ลูกค้า
+  nsuPopulateCustomers();
+  // แต้ม/โปรโมชั่น
+  nsuRenderPromo();
+}
+
+// แสดงแต้ม/โปรโมชั่น (ถ้ามีลูกค้าสมาชิก)
+function nsuRenderPromo(){
+  var area = document.getElementById('nsuPromoArea');
+  if(!area) return;
+  var pts = (typeof getTotalPoints==='function') ? 0 : 0;
+  // ใช้ระบบแต้มเดิมถ้ามี
+  var custEl = document.getElementById('customerSelect');
+  var hasCust = custEl && custEl.value;
+  if(!hasCust){ area.innerHTML=''; return; }
+  // แสดงปุ่มแลกแต้มถ้าระบบมี
+  if(typeof currentCustomerPoints!=='undefined' && currentCustomerPoints>0){
+    area.innerHTML = '<div class="nsu-promo-box"><span><i class="ti ti-star"></i> '+currentCustomerPoints+' แต้ม</span>'
+      + '<button onclick="if(typeof redeemPoints===\'function\'){redeemPoints();nsuRefresh();}" class="nsu-mini-btn">แลกแต้ม</button></div>';
+  } else {
+    area.innerHTML = '';
+  }
+}
+
+// hook nsuRefresh เดิมให้ update controls ด้วย
+var _origNsuRefresh = window.nsuRefresh;
+window.nsuRefresh = function(){
+  if(typeof _origNsuRefresh==='function') _origNsuRefresh();
+  nsuSyncControlsFromState();
+};
+
+// hook toggleNewUI ให้สร้าง controls เต็มตอนเปิด
+var _origToggleNewUI = window.toggleNewUI;
+window.toggleNewUI = function(on){
+  _origToggleNewUI(on);
+  if(on){
+    setTimeout(function(){ nsuBuildFullControls(); nsuRefresh(); }, 50);
+  }
+};
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 37: หน้าปลีก-ส่ง = หน้าหลัก (ซ่อนหน้าเดิม)
+// ============================================================
+// หน้าใหม่เป็นค่าเริ่มต้นเสมอ + ซ่อนหน้าเดิม + เอาปุ่ม "หน้าเดิม" ออก
+// element เดิมยังอยู่เบื้องหลัง (ระบบใช้คำนวณ) แค่ไม่แสดง
+
+// บังคับหน้าใหม่เป็น true เสมอ
+window.isNewUI = function(){ return true; };
+
+// override toggleNewUI: ไม่ให้ปิด (ปิดแล้วบังคับเปิดใหม่)
+var _prevToggleNewUI = window.toggleNewUI;
+window.toggleNewUI = function(on){
+  // บังคับเปิดเสมอ (ไม่ให้กลับหน้าเดิม)
+  _prevToggleNewUI(true);
+  hideOldSellUI();
+};
+
+// ซ่อนหน้าขายเดิม (pos-wrap) แต่เก็บ element ไว้ให้ระบบใช้
+function hideOldSellUI(){
+  // ซ่อน pos-wrap เดิม (ย้ายออกนอกจอ ไม่ลบ — element ยังทำงาน)
+  var posWrap = document.querySelector('.pos-wrap');
+  if(posWrap){
+    posWrap.style.position = 'absolute';
+    posWrap.style.left = '-99999px';
+    posWrap.style.top = '0';
+    posWrap.style.visibility = 'hidden';
+    posWrap.style.pointerEvents = 'none';
+  }
+  // ซ่อน topbar เดิม (หน้าใหม่มี topbar ของตัวเอง)
+  var topbar = document.querySelector('.topbar');
+  if(topbar){ topbar.style.display = 'none'; }
+}
+
+// เอาปุ่ม "↩ หน้าเดิม" ออกจากหน้าใหม่
+function removeBackButton(){
+  var ov = document.getElementById('newSellUI');
+  if(!ov) return;
+  var btns = ov.querySelectorAll('.nsu-topbtns button');
+  btns.forEach(function(b){ if(b.textContent.includes('หน้าเดิม')) b.remove(); });
+}
+
+// เอาปุ่ม "🏪 หน้าปลีก-ส่ง" ออกจาก topbar เดิม (ไม่ต้องมีแล้ว)
+function removeNewUIToggleBtn(){
+  var b = document.getElementById('newUIBtn');
+  if(b) b.remove();
+}
+
+// init: เปิดหน้าใหม่ทันที + ซ่อนเดิม
+(function forceNewUIMain(){
+  function run(){
+    if(!document.getElementById('newSellUI')){
+      if(typeof buildNewSellUI==='function') buildNewSellUI();
+    }
+    _prevToggleNewUI(true);
+    hideOldSellUI();
+    removeBackButton();
+    removeNewUIToggleBtn();
+    if(typeof nsuRefresh==='function') nsuRefresh();
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 300);
+  setTimeout(run, 800);
+  setTimeout(run, 1500);
+})();
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 38: หน้าปลีก-ส่ง เขียน logic ใหม่ (state-based)
+// ============================================================
+// เขียนใหม่: คำนวณเงินเก็บใน state object (ไม่พึ่ง DOM element เดิม)
+// getTotal/calcTotal ชี้มาที่ตัวใหม่ → confirmPayment เดิมยังใช้ได้ถูกต้อง
+
+// ===== STATE ของหน้าปลีก-ส่ง =====
+var NSU = {
+  discountVal: 0,
+  discountType: 'baht',   // 'baht' | 'percent'
+  vatOn: false,
+  coupon: null,           // activeCoupon (ใช้ระบบเดิม)
+  customer: ''
+};
+
+// ===== คำนวณเงินชุดใหม่ (บริสุทธิ์ ไม่แตะ DOM) =====
+function nsuCompute(){
+  var subtotal = order.reduce(function(s,i){ return s + i.price*i.qty; }, 0);
+  var totalQty = order.reduce(function(s,i){ return s + i.qty; }, 0);
+
+  // ส่วนลด (บาท/เปอร์เซ็นต์)
+  var disc = NSU.discountType==='percent' ? subtotal*NSU.discountVal/100 : NSU.discountVal;
+  disc = Math.min(disc, subtotal);
+
+  // คูปอง (ใช้ getCouponDiscount เดิม ถ้ามี activeCoupon)
+  var couponDisc = 0;
+  if(typeof activeCoupon!=='undefined' && activeCoupon && typeof getCouponDiscount==='function'){
+    couponDisc = getCouponDiscount(subtotal - disc);
+  }
+  var totalDiscount = Math.min(disc + couponDisc, subtotal);
+
+  var afterDisc = subtotal - totalDiscount;
+  var vat = NSU.vatOn ? afterDisc*0.07 : 0;
+  var total = afterDisc + vat;
+
+  return {
+    subtotal: subtotal, totalQty: totalQty,
+    discount: totalDiscount, discOnly: disc, couponDisc: couponDisc,
+    afterDisc: afterDisc, vat: vat, total: total, vatOn: NSU.vatOn
+  };
+}
+
+// ===== override getTotal/calcTotal ให้ใช้ NSU (confirmPayment เดิมจะได้ค่าถูก) =====
+window.getTotal = function(){
+  return nsuCompute().total;
+};
+
+window.calcTotal = function(){
+  // อัปเดต element เดิมด้วย (เผื่อ confirmPayment/พิมพ์ อ่านค่าจากมัน) — sync ค่า
+  var c = nsuCompute();
+  var dv = document.getElementById('discountVal');
+  var dt = document.getElementById('discountType');
+  var vt = document.getElementById('vatToggle');
+  if(dv) dv.value = NSU.discountVal;
+  if(dt) dt.value = NSU.discountType;
+  if(vt) vt.checked = NSU.vatOn;
+  // อัปเดตหน้าใหม่
+  nsuUpdateTotals(c);
+};
+
+// ===== อัปเดตยอดในหน้าใหม่ =====
+function nsuUpdateTotals(c){
+  c = c || nsuCompute();
+  var amtEl = document.getElementById('nsuTotalAmt');
+  var metaEl = document.getElementById('nsuTotalMeta');
+  if(amtEl) amtEl.textContent = fmt(c.total);
+  if(metaEl) metaEl.textContent = order.length+' รายการ · '+c.totalQty+' ชิ้น';
+  // แถวสรุป (subtotal/discount/vat)
+  var sumEl = document.getElementById('nsuSummary');
+  if(sumEl){
+    var rows = '';
+    if(c.discount>0) rows += '<div class="nsu-sum-row" style="color:#c62828"><span>ส่วนลด</span><span>-'+fmt(c.discount)+'</span></div>';
+    if(c.vatOn) rows += '<div class="nsu-sum-row"><span>VAT 7%</span><span>'+fmt(c.vat)+'</span></div>';
+    sumEl.innerHTML = rows;
+    // ซ่อนแถบถ้าไม่มีส่วนลด/VAT (ไม่โชว์เปล่าๆ)
+    sumEl.style.display = rows ? 'block' : 'none';
+  }
+  // อัปเดตยอด VAT ในแผงควบคุม
+  var vatAmtEl = document.getElementById('nsuVatAmt');
+  if(vatAmtEl) vatAmtEl.textContent = c.vatOn ? fmt(c.vat) : 'ปิด';
+}
+
+// ===== ตัวควบคุมหน้าใหม่ (เขียนใหม่ ใช้ NSU) =====
+window.nsuSetDiscount = function(){
+  var d = document.getElementById('nsuDiscount');
+  var t = document.getElementById('nsuDiscountType');
+  NSU.discountVal = parseFloat(d.value)||0;
+  NSU.discountType = t.value;
+  calcTotal();
+  nsuRefresh();
+};
+
+window.nsuSetVat = function(){
+  var v = document.getElementById('nsuVat');
+  NSU.vatOn = v.checked;
+  calcTotal();
+  nsuRefresh();
+};
+
+window.nsuApplyCouponNew = function(){
+  var nc = document.getElementById('nsuCoupon');
+  var oc = document.getElementById('couponInput');
+  if(oc && nc){ oc.value = nc.value; if(typeof applyCoupon==='function') applyCoupon(); }
+  // activeCoupon เดิมจะถูกตั้ง → nsuCompute อ่านได้
+  calcTotal();
+  nsuRefresh();
+};
+
+window.nsuSetCustomerNew = function(){
+  var nc = document.getElementById('nsuCustomer');
+  var oc = document.getElementById('customerSelect');
+  NSU.customer = nc.value;
+  if(oc){ oc.value = nc.value; oc.dispatchEvent(new Event('change')); }
+  calcTotal();
+  nsuRefresh();
+};
+
+// ===== reset NSU เมื่อเริ่มบิลใหม่ =====
+(function hookNewOrderNSU(){
+  var _orig = window.newOrder;
+  window.newOrder = function(){
+    _orig.apply(this, arguments);
+    NSU.discountVal = 0; NSU.discountType='baht'; NSU.coupon=null;
+    // VAT คงค่าเดิม (ตาม preference)
+    var vt = document.getElementById('vatToggle');
+    NSU.vatOn = vt ? vt.checked : false;
+    // ล้างช่องในหน้าใหม่
+    var nd=document.getElementById('nsuDiscount'); if(nd) nd.value='0';
+    var nc=document.getElementById('nsuCoupon'); if(nc) nc.value='';
+    if(typeof nsuRefresh==='function') nsuRefresh();
+  };
+})();
+
+// ===== sync NSU.vatOn จาก toggle เดิมตอนโหลด =====
+(function initNSUVat(){
+  function run(){
+    var vt = document.getElementById('vatToggle');
+    if(vt) NSU.vatOn = vt.checked;
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 500);
+})();
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 39: แก้ modal ใต้หน้าใหม่ + โน้ต + เช็คฟังก์ชันครบ
+// ============================================================
+
+// ===== แก้ z-index: modal ต้องอยู่เหนือหน้าใหม่ (newSellUI=500) =====
+(function fixModalZindex(){
+  var style = document.createElement('style');
+  style.id = 'nsuModalZfix';
+  style.textContent = ''
+    + '.modal-overlay { z-index: 1000 !important; }'   // เหนือ newSellUI (500)
+    + '#loginScreen { z-index: 2000 !important; }'      // login เหนือสุด
+    + '.toast, #toastContainer { z-index: 1500 !important; }';
+  document.head.appendChild(style);
+})();
+
+// ===== โน้ตรายการในหน้าใหม่ =====
+window.nsuToggleNote = function(id){
+  var item = order.find(function(i){return i.id===id;});
+  if(!item) return;
+  var note = prompt('โน้ตสำหรับ '+item.name+' (เช่น ไม่ใส่ผัก, แยกถุง):', item.note||'');
+  if(note!==null){
+    item.note = note;
+    if(typeof renderOrder==='function') renderOrder();
+    nsuRefresh();
+    showToast(note ? 'เพิ่มโน้ตแล้ว' : 'ลบโน้ตแล้ว');
+  }
+};
+
+// ===== เพิ่มปุ่มโน้ตในแต่ละแถวออเดอร์ (hook nsuRenderOrder) =====
+(function addNoteToRows(){
+  var _orig = window.nsuRenderOrder;
+  window.nsuRenderOrder = function(){
+    _orig.apply(this, arguments);
+    // เพิ่มไอคอนโน้ตในแต่ละแถว
+    var rows = document.querySelectorAll('#nsuOrderRows .nsu-order-row');
+    rows.forEach(function(row, i){
+      if(!order[i]) return;
+      var item = order[i];
+      var nameCell = row.querySelector('.nsu-oname');
+      if(nameCell && !nameCell.querySelector('.nsu-note-icon')){
+        var noteIcon = document.createElement('span');
+        noteIcon.className = 'nsu-note-icon';
+        noteIcon.style.cssText = 'cursor:pointer;margin-left:6px;font-size:12px;color:'+(item.note?'#f57f17':'#b0bec5');
+        noteIcon.innerHTML = '<i class="ti ti-note"></i>';
+        noteIcon.title = item.note ? ('โน้ต: '+item.note) : 'เพิ่มโน้ต';
+        noteIcon.onclick = function(e){ e.stopPropagation(); nsuToggleNote(item.id); };
+        nameCell.appendChild(noteIcon);
+        // แสดงโน้ตถ้ามี
+        if(item.note){
+          var noteText = document.createElement('div');
+          noteText.style.cssText = 'font-size:10px;color:#f57f17;margin-top:2px';
+          noteText.textContent = '📝 '+item.note;
+          nameCell.appendChild(noteText);
+        }
+      }
+    });
+  };
+})();
+
+// ===== เช็คฟังก์ชันครบ: hook openPayment ให้แน่ใจ modal โผล่เหนือหน้าใหม่ =====
+(function ensurePaymentVisible(){
+  var _orig = window.openPayment;
+  window.openPayment = function(method){
+    _orig.apply(this, arguments);
+    // ยก z-index modal ที่เปิดให้เหนือหน้าใหม่
+    setTimeout(function(){
+      var openModals = document.querySelectorAll('.modal-overlay.show');
+      openModals.forEach(function(m){ m.style.zIndex = '1000'; });
+    }, 50);
+  };
+})();
+
+// ===== hook confirmPayment: หลังชำระเสร็จ refresh หน้าใหม่ =====
+(function refreshAfterPayment(){
+  var _orig = window.confirmPayment;
+  window.confirmPayment = function(method){
+    _orig.apply(this, arguments);
+    setTimeout(function(){ if(typeof nsuRefresh==='function') nsuRefresh(); }, 100);
+  };
+})();
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 41: ยอดสุทธิหน้าใหม่ปรับขนาดได้
+// ============================================================
+
+// ให้ applyTotalSize (Part 31) ปรับ .nsu-total-amt ด้วย
+(function hookTotalSizeNsu(){
+  var _orig = window.applyTotalSize;
+  window.applyTotalSize = function(){
+    if(typeof _orig==='function') _orig();
+    // ปรับยอดสุทธิหน้าใหม่ด้วย
+    var px = (typeof loadTotalSize==='function') ? loadTotalSize() : 38;
+    var nsuAmt = document.getElementById('nsuTotalAmt');
+    if(nsuAmt){ nsuAmt.style.fontSize = px + 'px'; }
+  };
+})();
+
+// เรียกตอนเปิดหน้าใหม่ + ตอน refresh
+(function applyNsuTotalSize(){
+  function run(){ if(typeof applyTotalSize==='function') applyTotalSize(); }
+  setTimeout(run, 600);
+  setTimeout(run, 1200);
+  // hook nsuRefresh
+  var _r = window.nsuRefresh;
+  if(typeof _r==='function'){
+    window.nsuRefresh = function(){ _r.apply(this,arguments); run(); };
+  }
+})();
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 42: แก้ราคาสินค้ารายตัว + ส่วนลดรายตัว
+// ============================================================
+// คลิกที่ราคาในบิล → แก้ราคาใหม่ / ให้ส่วนลดรายตัวได้
+
+// เก็บราคาเดิมไว้ (เผื่อ reset)
+function nsuEditPrice(id){
+  var item = order.find(function(i){return i.id===id;});
+  if(!item) return;
+  var p = PRODUCTS.find(function(x){return x.id===id;});
+  var origPrice = p ? (p.priceRetail||p.price) : item.price;
+
+  // สร้าง mini dialog แก้ราคา
+  var existing = document.getElementById('nsuPriceEditPop');
+  if(existing) existing.remove();
+
+  var pop = document.createElement('div');
+  pop.id = 'nsuPriceEditPop';
+  pop.innerHTML = ''
+    + '<div class="nsu-pe-backdrop" onclick="nsuClosePriceEdit()"></div>'
+    + '<div class="nsu-pe-box">'
+    + '  <div class="nsu-pe-title">แก้ราคา: '+item.name+'</div>'
+    + '  <div class="nsu-pe-orig">ราคาปกติ ฿'+origPrice+'</div>'
+    + '  <label class="nsu-pe-label">ราคาใหม่ต่อชิ้น</label>'
+    + '  <div class="nsu-pe-inputrow">'
+    + '    <button onclick="nsuPriceStep('+id+',-1)">−</button>'
+    + '    <input type="number" id="nsuPeInput" value="'+item.price+'" min="0" step="0.5">'
+    + '    <button onclick="nsuPriceStep('+id+',1)">+</button>'
+    + '  </div>'
+    + '  <div class="nsu-pe-quick">'
+    + '    <button onclick="nsuPriceDiscount('+id+',5)">-5%</button>'
+    + '    <button onclick="nsuPriceDiscount('+id+',10)">-10%</button>'
+    + '    <button onclick="nsuPriceDiscount('+id+',20)">-20%</button>'
+    + '    <button onclick="nsuPriceReset('+id+','+origPrice+')">คืนราคาเดิม</button>'
+    + '  </div>'
+    + '  <div class="nsu-pe-actions">'
+    + '    <button class="nsu-pe-cancel" onclick="nsuClosePriceEdit()">ยกเลิก</button>'
+    + '    <button class="nsu-pe-save" onclick="nsuPriceSave('+id+')">บันทึก</button>'
+    + '  </div>'
+    + '</div>';
+  document.body.appendChild(pop);
+  setTimeout(function(){ var inp=document.getElementById('nsuPeInput'); if(inp){inp.focus();inp.select();} }, 50);
+  // Enter = บันทึก
+  document.getElementById('nsuPeInput').addEventListener('keydown', function(e){
+    if(e.key==='Enter'){ nsuPriceSave(id); }
+    if(e.key==='Escape'){ nsuClosePriceEdit(); }
+  });
+}
+
+function nsuPriceStep(id, delta){
+  var inp = document.getElementById('nsuPeInput');
+  if(inp){ inp.value = Math.max(0, (parseFloat(inp.value)||0) + delta); }
+}
+function nsuPriceDiscount(id, pct){
+  var item = order.find(function(i){return i.id===id;});
+  var p = PRODUCTS.find(function(x){return x.id===id;});
+  var base = p ? (p.priceRetail||p.price) : item.price;
+  var inp = document.getElementById('nsuPeInput');
+  if(inp){ inp.value = Math.round(base*(1-pct/100)*100)/100; }
+}
+function nsuPriceReset(id, origPrice){
+  var inp = document.getElementById('nsuPeInput');
+  if(inp){ inp.value = origPrice; }
+}
+function nsuPriceSave(id){
+  var item = order.find(function(i){return i.id===id;});
+  var inp = document.getElementById('nsuPeInput');
+  if(item && inp){
+    var newPrice = parseFloat(inp.value)||0;
+    item.price = newPrice;
+    item.priceEdited = true; // ทำเครื่องหมายว่าแก้ราคาแล้ว
+    if(typeof calcTotal==='function') calcTotal();
+    if(typeof renderOrder==='function') renderOrder();
+    nsuRefresh();
+    showToast('แก้ราคา '+item.name+' เป็น ฿'+newPrice);
+  }
+  nsuClosePriceEdit();
+}
+function nsuClosePriceEdit(){
+  var pop = document.getElementById('nsuPriceEditPop');
+  if(pop) pop.remove();
+}
+
+// ทำให้ราคาในแถวคลิกแก้ได้ (hook nsuRenderOrder)
+(function makePriceEditable(){
+  var _orig = window.nsuRenderOrder;
+  window.nsuRenderOrder = function(){
+    _orig.apply(this, arguments);
+    var rows = document.querySelectorAll('#nsuOrderRows .nsu-order-row');
+    rows.forEach(function(row, i){
+      if(!order[i]) return;
+      var item = order[i];
+      var priceCell = row.querySelector('.nsu-oprice');
+      if(priceCell && !priceCell.dataset.editable){
+        priceCell.dataset.editable = '1';
+        priceCell.style.cursor = 'pointer';
+        priceCell.style.textDecoration = 'underline dotted';
+        priceCell.style.color = item.priceEdited ? '#e8590c' : '#1971c2';
+        priceCell.title = 'คลิกเพื่อแก้ราคา';
+        // แสดงเครื่องหมายถ้าแก้ราคาแล้ว
+        if(item.priceEdited){ priceCell.innerHTML = item.price+' <i class="ti ti-pencil" style="font-size:10px"></i>'; }
+        priceCell.onclick = function(e){ e.stopPropagation(); nsuEditPrice(item.id); };
+      }
+    });
+  };
+})();
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 43: ยิงบาร์โค้ด/Enter เพิ่มสินค้าเข้าออเดอร์ทันที
+// ============================================================
+
+window.nsuSearchKey = function(e){
+  if(e.key!=='Enter') return;
+  var input = e.target;
+  var val = input.value.trim();
+  if(!val) return;
+
+  // แปลงบาร์โค้ดไทยมั่ว
+  if(typeof convertThaiBarcodeToDigits==='function'){
+    var conv = convertThaiBarcodeToDigits(val);
+    if(conv!==val && /^[0-9]+$/.test(conv)){ input.value=conv; val=conv; }
+  }
+
+  // 1. หาบาร์โค้ดตรงเป๊ะก่อน (กรณียิงบาร์โค้ด)
+  var found = PRODUCTS.find(function(p){ return p.visible!==false && p.barcode===val; });
+
+  // 2. ถ้าไม่เจอบาร์โค้ด → หาจากผลค้นหา (พิมพ์ชื่อ) เอาตัวแรก
+  if(!found){
+    var kw = val.toLowerCase();
+    var matches = PRODUCTS.filter(function(p){
+      return p.visible!==false && (p.name.toLowerCase().indexOf(kw)!==-1 || (p.barcode && p.barcode.indexOf(kw)!==-1));
+    });
+    if(matches.length>=1) found = matches[0];
+  }
+
+  if(found){
+    addToOrder(found.id);
+    showToast('เพิ่ม '+found.name);
+    input.value = '';
+    nsuRefresh();
+    input.focus(); // คงโฟกัสไว้ ยิงตัวถัดไปได้เลย
+    e.preventDefault();
+  } else {
+    showToast('ไม่พบสินค้า: '+val);
+  }
+};
+
+
 </script>
 
 
@@ -12547,12 +13739,352 @@ body.density-table .order-top h3 { font-size: 15px; }
 .pay-qr:hover { background: linear-gradient(135deg, #003c8f, #1565c0) !important; }
 .pp-save-btn { background: linear-gradient(135deg, #1565c0, #42a5f5) !important; }
 /* ปุ่มหลักต่างๆที่ใช้สีชมพู */
-.btn-save, .barcode-gen-btn, .promo-apply-title {
+.btn-save, .barcode-gen-btn {
   background: linear-gradient(135deg, #1565c0, #42a5f5) !important;
 }
+/* หัวข้อโปรโมชั่น: พื้นใส ตัวหนังสือส้ม (ไม่ให้สี่เหลี่ยมฟ้าบัง) */
+.promo-apply-title { background: transparent !important; color: #e65100 !important; }
 /* logo/brand accent */
 .brand-logo { background: linear-gradient(135deg, #1565c0, #42a5f5) !important; }
 
+</style>
+
+
+<!-- ============ POS v3.0 — PART 31 CSS: topbar ใหญ่ + ราคารวมใหญ่ ============ -->
+<style id="posV3Part31">
+/* ข้อ 1: topbar ใหญ่ขึ้น กว้างขึ้น */
+.topbar {
+  min-height: 64px !important;
+  padding: 10px 16px !important;
+}
+.tb-btn {
+  min-width: 72px !important;
+  min-height: 52px !important;
+  font-size: 13px !important;
+  padding: 10px 14px !important;
+}
+.topbar .brand, .topbar .logo, .brand-logo {
+  transform: scale(1.1);
+}
+
+/* ข้อ 2: ราคารวมทั้งสิ้น ใหญ่ + เขียวเข้ม (default 48px, ปรับได้) */
+.summary-row.total {
+  color: #1b5e20 !important;
+  font-weight: 800 !important;
+  border-top: 2px solid #a5d6a7;
+  padding-top: 10px;
+  margin-top: 6px;
+  align-items: baseline;
+}
+.summary-row.total span {
+  color: #1b5e20 !important;
+  font-weight: 800 !important;
+}
+.summary-row.total span:first-child {
+  font-size: 0.42em;  /* คำว่า "รวมทั้งสิ้น" เล็กกว่าตัวเลข */
+}
+
+/* ปุ่มบัตรสวัสดิการ */
+.pay-welfare:hover { filter: brightness(1.08); }
+</style>
+
+
+<!-- ============ POS v3.0 — ข้อ 8: รายการออเดอร์แบบตารางกะทัดรัด ============ -->
+<style id="posV3OrderCompact">
+/* รายการในออเดอร์: แถวเดียว กะทัดรัด แบบตาราง */
+.order-item {
+  display: grid !important;
+  grid-template-columns: 22px 1fr auto 90px 24px !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 7px 8px !important;
+  border-bottom: 1px solid #eee !important;
+}
+
+/* ซ่อนอีโมจิ (ประหยัดที่) */
+.order-item .item-emoji { display: none !important; }
+
+/* เลขลำดับ (สร้างด้วย counter) */
+.order-items { counter-reset: orderline; }
+.order-item { counter-increment: orderline; position: relative; }
+.order-item .item-info::before {
+  content: counter(orderline) ". ";
+  font-weight: 700; color: var(--primary); font-size: 12px;
+}
+
+/* ชื่อ + ราคาต่อชิ้น อยู่ในคอลัมน์เดียว (บรรทัดเดียว) */
+.order-item .item-info {
+  grid-column: 2 !important;
+  min-width: 0 !important;
+  display: flex !important;
+  align-items: baseline !important;
+  gap: 6px !important;
+  flex-wrap: nowrap !important;
+  overflow: hidden !important;
+}
+.order-item .item-name {
+  font-size: 12.5px !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  margin: 0 !important;
+}
+.order-item .item-unit {
+  font-size: 10.5px !important;
+  color: var(--text-muted) !important;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+}
+
+/* ปุ่ม +/- จำนวน อยู่คอลัมน์ 3 กะทัดรัด */
+.order-item .item-controls {
+  grid-column: 3 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 3px !important;
+  flex-shrink: 0 !important;
+}
+.order-item .qty-btn { width: 22px !important; height: 22px !important; font-size: 14px !important; padding: 0 !important; }
+.order-item .qty-num { font-size: 12.5px !important; min-width: 20px !important; text-align: center !important; }
+
+/* ราคารวมรายการ คอลัมน์ 4 ชิดขวา */
+.order-item .item-price {
+  grid-column: 4 !important;
+  text-align: right !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  color: var(--primary-dark) !important;
+}
+
+/* ปุ่มลบ คอลัมน์ 5 */
+.order-item .item-del {
+  grid-column: 5 !important;
+  width: 22px !important; height: 22px !important;
+}
+
+/* ซ่อนปุ่มโน้ต + กล่องราคา flex-column เดิม (จัดใหม่ด้วย grid) */
+.order-item .item-note-btn { display: none !important; }
+.order-item > div:last-child {
+  display: contents !important; /* ให้ลูก (ปุ่มลบ+ราคา) เข้า grid ตรงๆ */
+}
+
+/* ลดความกว้างช่องส่วนลด/คูปอง ให้กะทัดรัด */
+.summary { padding: 8px 10px !important; }
+</style>
+
+
+<!-- ============ POS v3.0 — PART 35 CSS: หน้าขายใหม่ ร้านปลีก-ส่ง ============ -->
+<style id="posV3NewUI">
+#newSellUI {
+  display: none;
+  position: fixed; inset: 0; z-index: 500;
+  background: #f5f9ff;
+  flex-direction: column;
+  font-family: 'Sarabun', sans-serif;
+}
+body.newui-active { overflow: hidden; }
+
+/* topbar */
+.nsu-topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  background: linear-gradient(135deg,#0C447C,#185FA5);
+  padding: 10px 16px; flex-shrink: 0;
+}
+.nsu-brand { color: #fff; font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.nsu-topbtns { display: flex; gap: 6px; flex-wrap: wrap; }
+.nsu-topbtns button {
+  background: rgba(255,255,255,0.18); color: #fff; border: none;
+  padding: 9px 13px; border-radius: 8px; font-size: 12px; cursor: pointer;
+  font-family: 'Sarabun', sans-serif; display: flex; align-items: center; gap: 4px;
+}
+.nsu-topbtns button:hover { background: rgba(255,255,255,0.3); }
+
+/* body: 2 คอลัมน์ */
+.nsu-body { flex: 1; display: grid; grid-template-columns: 1fr 1.5fr; gap: 10px; padding: 10px; overflow: hidden; }
+.nsu-left, .nsu-right { display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+
+/* ค้นหา */
+.nsu-search { position: relative; flex-shrink: 0; }
+.nsu-search i { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #185FA5; font-size: 20px; }
+.nsu-search input {
+  width: 100%; padding: 12px 12px 12px 40px; border: 2px solid #185FA5;
+  border-radius: 10px; font-size: 15px; font-family: 'Sarabun', sans-serif; outline: none;
+}
+
+/* ระดับราคา */
+.nsu-pricetier { background: #E6F1FB; border-radius: 8px; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+.nsu-pricetier > span { font-size: 12px; color: #0C447C; font-weight: 600; }
+.nsu-tierbtns { display: flex; gap: 4px; }
+.nsu-tierbtns button {
+  background: #fff; color: #185FA5; border: 0.5px solid #85B7EB;
+  padding: 6px 14px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: 'Sarabun', sans-serif;
+}
+.nsu-tierbtns button.active { background: #185FA5; color: #fff; border-color: #185FA5; font-weight: 600; }
+
+/* กริดสินค้า */
+.nsu-prodwrap { flex: 1; overflow-y: auto; }
+.nsu-prodgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(105px, 1fr)); gap: 7px; }
+.nsu-pcard {
+  background: #fff; border: 0.5px solid #bbdefb; border-radius: 9px;
+  padding: 11px 8px; text-align: center; cursor: pointer; transition: all 0.12s;
+}
+.nsu-pcard:hover { border-color: #185FA5; box-shadow: 0 2px 6px rgba(24,95,165,0.15); }
+.nsu-pcard.out { opacity: 0.5; }
+.nsu-pname { font-size: 12px; font-weight: 500; margin-bottom: 4px; line-height: 1.2; }
+.nsu-pprice { font-size: 16px; font-weight: 700; color: #185FA5; }
+.nsu-pstock { font-size: 10px; color: #90a4ae; margin-top: 2px; }
+.nsu-empty { text-align: center; padding: 30px; color: #90a4ae; font-size: 13px; }
+
+/* ยอดรวม */
+.nsu-total { background: #EAF3DE; border-radius: 10px; padding: 10px 16px; text-align: right; flex-shrink: 0; position: relative; }
+.nsu-total-meta { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); font-size: 12px; color: #3B6D11; text-align: left; }
+.nsu-total-label { font-size: 12px; color: #3B6D11; }
+.nsu-total-amt { font-size: 38px; font-weight: 800; color: #173404; line-height: 1; }
+
+/* ตารางออเดอร์ */
+.nsu-ordertable { flex: 1; overflow-y: auto; background: #fff; border-radius: 10px; border: 0.5px solid #bbdefb; }
+.nsu-order-head, .nsu-order-row {
+  display: grid; grid-template-columns: 30px 1fr 55px 90px 70px 30px;
+  align-items: center; gap: 6px; padding: 7px 10px; font-size: 12.5px;
+}
+.nsu-order-head { background: #185FA5; color: #fff; position: sticky; top: 0; font-size: 12px; }
+.nsu-order-head span:nth-child(3), .nsu-order-head span:nth-child(5) { text-align: right; }
+.nsu-order-head span:nth-child(4) { text-align: center; }
+.nsu-order-row { border-bottom: 0.5px solid #eee; }
+.nsu-order-row:nth-child(even) { background: #fafcff; }
+.nsu-oname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nsu-oprice { text-align: right; color: #666; }
+.nsu-ototal { text-align: right; font-weight: 700; color: #0C447C; }
+.nsu-oqty { display: flex; align-items: center; justify-content: center; gap: 4px; }
+.nsu-oqty button { width: 22px; height: 22px; border: 0.5px solid #bbdefb; background: #f5f9ff; border-radius: 5px; cursor: pointer; font-size: 14px; color: #185FA5; }
+.nsu-odel { width: 22px; height: 22px; border: none; background: #ffebee; color: #c62828; border-radius: 5px; cursor: pointer; }
+
+/* ปุ่มชำระ */
+.nsu-paybtns { display: flex; gap: 6px; flex-shrink: 0; }
+.nsu-paybtns button { border: none; border-radius: 9px; padding: 15px 8px; font-size: 14px; font-weight: 700; cursor: pointer; color: #fff; font-family: 'Sarabun', sans-serif; }
+.nsu-pay-cash { flex: 2; background: linear-gradient(135deg,#0F6E56,#1D9E75); }
+.nsu-pay-qr { flex: 1; background: linear-gradient(135deg,#185FA5,#378ADD); }
+.nsu-pay-split { flex: 1; background: linear-gradient(135deg,#5e35b1,#9575cd); }
+.nsu-pay-welfare { flex: 1; background: linear-gradient(135deg,#00897b,#4db6ac); }
+
+/* มือถือ: คอลัมน์เดียว */
+@media (max-width: 820px) {
+  .nsu-body { grid-template-columns: 1fr; }
+}
+</style>
+
+
+<!-- ============ POS v3.0 — PART 36 CSS: แผงควบคุมเต็มหน้าปลีก-ส่ง ============ -->
+<style id="posV3NewUIFull">
+#nsuControls { background:#fff; border:0.5px solid #bbdefb; border-radius:10px; padding:10px; flex-shrink:0; display:flex; flex-direction:column; gap:7px; }
+.nsu-ctrl-row { display:flex; gap:8px; }
+.nsu-ctrl-field { flex:1; display:flex; flex-direction:column; gap:3px; }
+.nsu-ctrl-field label { font-size:11px; color:#607d8b; }
+.nsu-ctrl-field select, .nsu-ctrl-field input {
+  padding:7px 9px; border:1px solid #cfe0f0; border-radius:7px; font-size:13px;
+  font-family:'Sarabun',sans-serif; outline:none; width:100%; box-sizing:border-box;
+}
+.nsu-mini-btn { padding:7px 12px; background:#185FA5; color:#fff; border:none; border-radius:7px; font-size:12px; cursor:pointer; font-family:'Sarabun',sans-serif; white-space:nowrap; }
+.nsu-vat-row { align-items:center; justify-content:space-between; padding:4px 0; border-top:0.5px solid #eee; }
+.nsu-promo-box { display:flex; align-items:center; justify-content:space-between; background:#fff8e1; border:1px solid #ffe082; border-radius:8px; padding:8px 12px; font-size:13px; color:#f57f17; font-weight:500; }
+.nsu-hold-btn { padding:8px 16px; background:#eceff1; color:#455a64; border:none; border-radius:7px; font-size:12px; cursor:pointer; font-family:'Sarabun',sans-serif; display:flex; align-items:center; gap:4px; }
+.nsu-clear-btn { padding:8px 16px; background:#ffebee; color:#c62828; border:none; border-radius:7px; font-size:12px; cursor:pointer; font-family:'Sarabun',sans-serif; display:flex; align-items:center; gap:4px; }
+</style>
+
+
+<!-- PART 38 CSS: แถวสรุปหน้าใหม่ -->
+<style id="posV3NewUISummary">
+.nsu-summary { background:#fff; border:0.5px solid #bbdefb; border-radius:8px; padding:6px 12px; flex-shrink:0; }
+.nsu-sum-row { display:flex; justify-content:space-between; font-size:12.5px; padding:2px 0; color:#455a64; }
+</style>
+
+
+<!-- ============ POS v3.0 — PART 40: สีสดใสหน้าปลีก-ส่ง ============ -->
+<style id="posV3NewUIColor">
+/* พื้นหลังไล่สีอ่อนๆ สดใส */
+#newSellUI { background: linear-gradient(135deg,#eaf4ff 0%,#f0f9ff 50%,#eafff4 100%) !important; }
+
+/* topbar สีสดขึ้น + เงา */
+.nsu-topbar { background: linear-gradient(135deg,#0d6efd,#4dabf7,#3bc9db) !important; box-shadow: 0 3px 12px rgba(13,110,253,0.3) !important; }
+.nsu-topbtns button { background: rgba(255,255,255,0.22) !important; font-weight: 500; }
+.nsu-topbtns button:hover { background: rgba(255,255,255,0.38) !important; transform: translateY(-1px); }
+
+/* การ์ดสินค้า สลับสีสดใส (วนสี) */
+.nsu-pcard:nth-child(6n+1) { background: linear-gradient(135deg,#fff,#e7f5ff); border-color:#74c0fc; }
+.nsu-pcard:nth-child(6n+2) { background: linear-gradient(135deg,#fff,#e6fcf5); border-color:#63e6be; }
+.nsu-pcard:nth-child(6n+3) { background: linear-gradient(135deg,#fff,#fff3bf); border-color:#ffd43b; }
+.nsu-pcard:nth-child(6n+4) { background: linear-gradient(135deg,#fff,#ffe8cc); border-color:#ffa94d; }
+.nsu-pcard:nth-child(6n+5) { background: linear-gradient(135deg,#fff,#f3d9fa); border-color:#da77f2; }
+.nsu-pcard:nth-child(6n+6) { background: linear-gradient(135deg,#fff,#ffe3e3); border-color:#ff8787; }
+.nsu-pcard { transition: all 0.15s; }
+.nsu-pcard:hover { transform: translateY(-2px) scale(1.02); box-shadow: 0 4px 14px rgba(0,0,0,0.15) !important; }
+.nsu-pcard:active { transform: scale(0.97); }
+.nsu-pprice { color: #1971c2 !important; }
+
+/* ปุ่มระดับราคา สดใส */
+.nsu-pricetier { background: linear-gradient(135deg,#e7f5ff,#d0ebff) !important; }
+.nsu-tierbtns button.active { background: linear-gradient(135deg,#1971c2,#4dabf7) !important; box-shadow: 0 2px 6px rgba(25,113,194,0.4); }
+
+/* ช่องค้นหา เด่นสดใส */
+.nsu-search input { border-color: #4dabf7 !important; box-shadow: 0 2px 8px rgba(77,171,247,0.15); }
+.nsu-search input:focus { border-color: #1971c2 !important; box-shadow: 0 0 0 3px rgba(77,171,247,0.2); }
+
+/* ยอดสุทธิ เขียวสดใส + เงา */
+.nsu-total { background: linear-gradient(135deg,#d3f9d8,#b2f2bb) !important; box-shadow: 0 3px 10px rgba(64,192,87,0.25) !important; }
+.nsu-total-amt { color: #2b8a3e !important; }
+
+/* หัวตาราง สดใส */
+.nsu-order-head { background: linear-gradient(135deg,#1971c2,#4dabf7) !important; }
+.nsu-order-row:hover { background: #e7f5ff !important; }
+
+/* ปุ่มชำระ สดใส + เงา + เด้ง */
+.nsu-paybtns button { box-shadow: 0 3px 10px rgba(0,0,0,0.2); transition: all 0.15s; }
+.nsu-paybtns button:hover { transform: translateY(-2px); box-shadow: 0 5px 16px rgba(0,0,0,0.28); }
+.nsu-paybtns button:active { transform: translateY(0) scale(0.97); }
+.nsu-pay-cash { background: linear-gradient(135deg,#2f9e44,#51cf66) !important; }
+.nsu-pay-qr { background: linear-gradient(135deg,#1971c2,#4dabf7) !important; }
+.nsu-pay-split { background: linear-gradient(135deg,#7048e8,#9775fa) !important; }
+.nsu-pay-welfare { background: linear-gradient(135deg,#0ca678,#20c997) !important; }
+
+/* แถวสรุป */
+.nsu-summary { background: linear-gradient(135deg,#fff,#f8f9ff) !important; }
+
+/* ปุ่มจำนวน +/- สดใส */
+.nsu-oqty button { background: #e7f5ff !important; border-color:#74c0fc !important; color:#1971c2 !important; font-weight:600; }
+.nsu-oqty button:hover { background:#4dabf7 !important; color:#fff !important; }
+</style>
+
+
+<!-- PART 41 CSS: ปุ่มล้างบิลใหม่ + ยอดปรับขนาด -->
+<style id="posV3Part41">
+.nsu-clear-btn2 {
+  padding: 7px 10px; background: #fff0f0; color: #e03131;
+  border: 1px solid #ffc9c9; border-radius: 7px; font-size: 11px;
+  cursor: pointer; font-family: 'Sarabun', sans-serif; white-space: nowrap; flex-shrink: 0;
+}
+.nsu-clear-btn2:hover { background: #ffe3e3; }
+/* ยอดสุทธิหน้าใหม่ ปรับขนาดได้ (default จาก loadTotalSize) */
+.nsu-total-amt { transition: font-size 0.15s; }
+</style>
+
+
+<!-- PART 42 CSS: dialog แก้ราคารายตัว -->
+<style id="posV3PriceEdit">
+#nsuPriceEditPop { position:fixed; inset:0; z-index:1200; display:flex; align-items:center; justify-content:center; }
+.nsu-pe-backdrop { position:absolute; inset:0; background:rgba(0,0,0,0.35); }
+.nsu-pe-box { position:relative; background:#fff; border-radius:14px; padding:20px; width:340px; max-width:92vw; box-shadow:0 10px 40px rgba(0,0,0,0.25); font-family:'Sarabun',sans-serif; }
+.nsu-pe-title { font-size:15px; font-weight:600; color:#0c447c; margin-bottom:4px; }
+.nsu-pe-orig { font-size:12px; color:#868e96; margin-bottom:14px; }
+.nsu-pe-label { font-size:12px; color:#495057; display:block; margin-bottom:6px; }
+.nsu-pe-inputrow { display:flex; gap:8px; align-items:center; margin-bottom:12px; }
+.nsu-pe-inputrow button { width:44px; height:44px; border:1.5px solid #4dabf7; background:#e7f5ff; color:#1971c2; border-radius:10px; font-size:22px; cursor:pointer; flex-shrink:0; }
+.nsu-pe-inputrow input { flex:1; text-align:center; font-size:22px; font-weight:700; padding:8px; border:1.5px solid #4dabf7; border-radius:10px; outline:none; min-width:0; }
+.nsu-pe-quick { display:flex; gap:6px; margin-bottom:16px; flex-wrap:wrap; }
+.nsu-pe-quick button { flex:1; min-width:60px; padding:8px 4px; border:1px solid #ffc9c9; background:#fff5f5; color:#e03131; border-radius:8px; font-size:12px; cursor:pointer; font-family:'Sarabun',sans-serif; }
+.nsu-pe-quick button:last-child { border-color:#bbdefb; background:#e7f5ff; color:#1971c2; }
+.nsu-pe-actions { display:flex; gap:8px; }
+.nsu-pe-cancel { flex:1; padding:12px; border:1.5px solid #dee2e6; background:#f8f9fa; color:#495057; border-radius:10px; font-size:14px; cursor:pointer; font-family:'Sarabun',sans-serif; }
+.nsu-pe-save { flex:2; padding:12px; border:none; background:linear-gradient(135deg,#2f9e44,#51cf66); color:#fff; border-radius:10px; font-size:14px; font-weight:600; cursor:pointer; font-family:'Sarabun',sans-serif; }
 </style>
 
 </body>
