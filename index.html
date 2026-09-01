@@ -13567,6 +13567,131 @@ document.addEventListener('keydown', function(e){
 })();
 
 
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 46: แก้ 5 ปัญหา (คีย์ลัด, ล้างออเดอร์ Enter, ค้นหา, กล้อง, แปลงไทย)
+// ============================================================
+
+// ===== ข้อ 5: แก้แปลงไทยเพี้ยนตอนพิมพ์ชื่อ =====
+// แปลงเฉพาะเมื่อ "ทั้งสตริง" เป็นอักขระแป้นเลขไทยล้วน (ยิงบาร์โค้ดผิดภาษา)
+// ถ้ามีตัวอักษรไทยปกติ (ชื่อสินค้า) → ไม่แปลง
+function isLikelyThaiBarcode(str){
+  if(!str) return false;
+  // ทุกตัวต้องอยู่ในชุดแป้น Kedmanee แถวตัวเลข (ๅ/-ภถุูค฿ตจขช) หรือตัวเลข
+  var keys = 'ๅ/_-ภถุูค฿ตจขช+๑๒๓๔๕๖๗๘๙๐';
+  for(var i=0;i<str.length;i++){
+    var ch = str[i];
+    if(/[0-9]/.test(ch)) continue;
+    if(keys.indexOf(ch)===-1) return false; // มีอักขระอื่น = ชื่อจริง ไม่ใช่บาร์โค้ด
+  }
+  return true;
+}
+
+// override nsuSearchKey ให้แปลงเฉพาะบาร์โค้ดจริง
+window.nsuSearchKey = function(e){
+  if(e.key!=='Enter') return;
+  var input = e.target;
+  var val = input.value.trim();
+  if(!val) return;
+
+  // แปลงไทย→เลข เฉพาะเมื่อเป็นแป้นเลขไทยล้วน (ยิงบาร์โค้ดผิดภาษา)
+  if(isLikelyThaiBarcode(val) && typeof convertThaiBarcodeToDigits==='function'){
+    var conv = convertThaiBarcodeToDigits(val);
+    if(/^[0-9]+$/.test(conv)){ input.value=conv; val=conv; }
+  }
+
+  // หาบาร์โค้ดตรงเป๊ะ
+  var found = PRODUCTS.find(function(p){ return p.visible!==false && p.barcode===val; });
+  // ไม่เจอ → หาจากชื่อ (เอาตัวแรก)
+  if(!found){
+    var kw = val.toLowerCase();
+    var matches = PRODUCTS.filter(function(p){
+      return p.visible!==false && (p.name.toLowerCase().indexOf(kw)!==-1 || (p.barcode && p.barcode.indexOf(kw)!==-1));
+    });
+    if(matches.length>=1) found = matches[0];
+  }
+  if(found){
+    addToOrder(found.id); showToast('เพิ่ม '+found.name);
+    input.value=''; nsuRefresh(); input.focus(); e.preventDefault();
+  } else {
+    showToast('ไม่พบสินค้า: '+val);
+  }
+};
+
+// nsuSearchInput ไม่แปลงไทย (แค่ค้นหาตามที่พิมพ์)
+window.nsuSearchInput = function(){
+  var s = document.getElementById('nsuSearch');
+  if(s) nsuRenderProducts(s.value);
+};
+
+// ===== ข้อ 2: หน้า "ล้างออเดอร์?" กด Enter ยืนยันได้ =====
+document.addEventListener('keydown', function(e){
+  var ov = document.getElementById('confirmOverlay');
+  if(ov && ov.classList.contains('show')){
+    if(e.key==='Enter'){
+      e.preventDefault(); e.stopPropagation();
+      if(typeof confirmResolve==='function') confirmResolve(true);
+    } else if(e.key==='Escape'){
+      e.preventDefault();
+      if(typeof confirmResolve==='function') confirmResolve(false);
+    }
+  }
+}, true);
+
+// ===== ข้อ 3: คีย์ลัดโฟกัสช่องค้นหา → ชี้ nsuSearch (หน้าใหม่) =====
+(function fixFocusSearchShortcut(){
+  if(typeof SHORTCUT_ACTIONS==='undefined') return;
+  var act = SHORTCUT_ACTIONS.find(function(a){return a.id==='focus_search';});
+  if(act){
+    act.run = function(){
+      var nsu = document.getElementById('nsuSearch');
+      var old = document.getElementById('searchInput');
+      var target = (nsu && document.getElementById('newSellUI') && document.getElementById('newSellUI').style.display!=='none') ? nsu : old;
+      if(target){ target.focus(); target.select && target.select(); }
+    };
+  }
+})();
+
+// ===== ข้อ 1: คีย์ลัด Web ไม่ให้ทับ Chrome (F-keys) =====
+// ดัก F-keys ที่ระบบใช้ ให้ preventDefault (กัน Chrome เปิด devtools/help)
+document.addEventListener('keydown', function(e){
+  // เฉพาะ F1-F12 ที่ระบบผูกไว้
+  if(/^F([1-9]|1[0-2])$/.test(e.key)){
+    // เช็คว่าคีย์นี้ระบบใช้ไหม
+    if(typeof currentShortcuts!=='undefined'){
+      var used = Object.values(currentShortcuts).indexOf(e.key)!==-1;
+      // F12 (devtools) — ให้ระบบใช้ได้ถ้าผูกไว้
+      if(used){ e.preventDefault(); }
+    }
+  }
+}, false);
+
+
+// ===== ข้อ 4: กล้องสแกน — หน้าเพิ่มสินค้าไม่บัง + สแกนติด =====
+// camScanModal ต้องอยู่เหนือ quickAddModal เสมอ
+(function fixCamZindex(){
+  function run(){
+    var cam = document.getElementById('camScanModal');
+    if(cam){ cam.style.zIndex = '9999'; } // สูงสุด ไม่โดน quickAdd บัง
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 500);
+})();
+
+// override openCamScanFor ให้ยก z-index ก่อนเปิด
+(function patchCamOpen(){
+  var _orig = window.openCamScanFor;
+  if(typeof _orig!=='function') return;
+  window.openCamScanFor = function(target){
+    var cam = document.getElementById('camScanModal');
+    if(cam) cam.style.zIndex = '9999';
+    return _orig.apply(this, arguments);
+  };
+})();
+
+
 </script>
 
 
