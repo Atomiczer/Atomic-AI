@@ -14142,6 +14142,47 @@ function nsuClosePinManager(){
 })();
 
 
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 49: แก้ ESC ในหน้าใหม่ไม่ให้เด้งล้างออเดอร์
+// ============================================================
+// ปัญหา: กด ESC ปิด dialog หน้าใหม่ (welfare/แก้ราคา/ไม่พบ) แล้ว ESC ทะลุไปโดน clearOrder
+// แก้: ดัก ESC ที่ capture phase — ถ้ามี dialog หน้าใหม่เปิดอยู่ ปิดแค่ dialog นั้น หยุด propagation
+
+document.addEventListener('keydown', function(e){
+  if(e.key!=='Escape') return;
+
+  // เช็ค dialog ของหน้าใหม่ทั้งหมด
+  var newDialogs = [
+    'nsuWelfarePop',      // บัตรสวัสดิการ
+    'nsuQtyEditPop',      // แก้จำนวน/ราคา (F3)
+    'nsuPriceEditPop',    // แก้ราคา (คลิกราคา)
+    'nsuNotFoundPop',     // ไม่พบสินค้า
+    'nsuPinPop',          // ปักหมุด
+    'nsuPriceEditPop'
+  ];
+
+  for(var i=0;i<newDialogs.length;i++){
+    var dlg = document.getElementById(newDialogs[i]);
+    if(dlg){
+      // มี dialog หน้าใหม่เปิดอยู่ → ปิดแค่ตัวนี้ + หยุด ESC ไม่ให้ทะลุ
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      // เรียกฟังก์ชันปิดที่ถูกต้อง
+      if(newDialogs[i]==='nsuWelfarePop' && typeof nsuCloseWelfare==='function') nsuCloseWelfare();
+      else if(newDialogs[i]==='nsuQtyEditPop' && typeof nsuCloseQtyEdit==='function') nsuCloseQtyEdit();
+      else if(newDialogs[i]==='nsuPriceEditPop' && typeof nsuClosePriceEdit==='function') nsuClosePriceEdit();
+      else if(newDialogs[i]==='nsuNotFoundPop' && typeof nsuCloseNotFound==='function') nsuCloseNotFound();
+      else if(newDialogs[i]==='nsuPinPop' && typeof nsuClosePinManager==='function') nsuClosePinManager();
+      else dlg.remove();
+      return;
+    }
+  }
+}, true); // capture phase = ทำงานก่อน handler ล้างออเดอร์
+
+
 </script>
 
 
