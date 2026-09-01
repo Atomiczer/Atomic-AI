@@ -13692,6 +13692,456 @@ document.addEventListener('keydown', function(e){
 })();
 
 
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 47: ปุ่มปิด, คีย์ลัดค้าง, F3 แก้จำนวน, welfare แยกเงิน
+// ============================================================
+
+// ===== ข้อ 1: ปุ่มปิดโปรแกรม (X) มุมขวาบน (สำหรับ kiosk) =====
+(function addCloseButton(){
+  function run(){
+    var topbar = document.querySelector('#newSellUI .nsu-topbtns');
+    if(!topbar || document.getElementById('nsuCloseBtn')) return;
+    var btn = document.createElement('button');
+    btn.id = 'nsuCloseBtn';
+    btn.innerHTML = '<i class="ti ti-x"></i> ปิด';
+    btn.style.cssText = 'background:rgba(255,80,80,0.9) !important;font-weight:600';
+    btn.onclick = function(){
+      showConfirm('ปิดโปรแกรม','ต้องการปิดโปรแกรม POS?','⚠️','ปิดโปรแกรม','').then(function(ok){
+        if(ok){ try{ window.close(); }catch(e){} try{ window.open('','_self').close(); }catch(e){} }
+      });
+    };
+    topbar.appendChild(btn);
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 500);
+  setTimeout(run, 1200);
+})();
+
+// ===== ข้อ 3: แก้คีย์ลัดค้าง (โฟกัสช่องค้นหาแล้วกดปุ่มอื่นไม่ได้) =====
+// ปัญหา: เมื่อโฟกัสในช่องค้นหา คีย์ลัด F-keys ถูกบล็อก
+// แก้: ให้ F-keys ทำงานได้เสมอ แม้อยู่ในช่องค้นหา
+(function fixShortcutInInput(){
+  // ดัก F-keys ที่ capture phase (ก่อน input จะกิน)
+  document.addEventListener('keydown', function(e){
+    // F1-F12 ให้ทำงานเสมอแม้อยู่ในช่อง input
+    if(/^F([1-9]|1[0-2])$/.test(e.key)){
+      if(typeof runShortcutAction==='function'){
+        var handled = runShortcutAction(e);
+        if(handled){ e.preventDefault(); e.stopPropagation(); }
+      }
+    }
+  }, true); // capture = ทำงานก่อน handler อื่น
+})();
+
+// ===== ข้อ 4: F3 = แก้จำนวนสินค้าตัวล่าสุด → Enter → แก้ราคา → Enter → กลับค้นหา =====
+var _f3EditState = null; // {id, stage: 'qty'|'price'}
+
+// เปลี่ยน F3 จากบัตรเครดิต → แก้จำนวน
+(function remapF3(){
+  if(typeof SHORTCUT_ACTIONS==='undefined') return;
+  var creditAct = SHORTCUT_ACTIONS.find(function(a){return a.id==='pay_credit';});
+  if(creditAct){ creditAct.def='Ctrl+3'; }  // ย้ายบัตรเครดิตไป Ctrl+3
+  // เพิ่ม action แก้จำนวน
+  var editAct = SHORTCUT_ACTIONS.find(function(a){return a.id==='edit_qty';});
+  if(!editAct){
+    SHORTCUT_ACTIONS.push({ id:'edit_qty', name:'แก้จำนวน/ราคาสินค้าล่าสุด', def:'F3', group:'🛒 ออเดอร์', run:function(){ nsuStartEditLast(); } });
+  }
+  // อัปเดต currentShortcuts
+  if(typeof currentShortcuts!=='undefined'){
+    if(currentShortcuts.pay_credit==='F3') currentShortcuts.pay_credit='Ctrl+3';
+    if(!currentShortcuts.edit_qty) currentShortcuts.edit_qty='F3';
+    if(typeof saveShortcuts==='function') saveShortcuts(currentShortcuts);
+  }
+})();
+
+// เริ่มแก้จำนวนสินค้าตัวล่าสุด
+function nsuStartEditLast(){
+  if(!order.length){ showToast('ยังไม่มีสินค้าในออเดอร์'); return; }
+  var lastItem = order[order.length-1];
+  nsuOpenQtyEdit(lastItem.id);
+}
+
+// dialog แก้จำนวน (stage 1) → ราคา (stage 2)
+function nsuOpenQtyEdit(id){
+  var item = order.find(function(i){return i.id===id;});
+  if(!item) return;
+  var existing = document.getElementById('nsuQtyEditPop');
+  if(existing) existing.remove();
+
+  var pop = document.createElement('div');
+  pop.id = 'nsuQtyEditPop';
+  pop.innerHTML = ''
+    + '<div class="nsu-qe-backdrop" onclick="nsuCloseQtyEdit()"></div>'
+    + '<div class="nsu-qe-box">'
+    + '  <div class="nsu-qe-title">'+item.name+'</div>'
+    + '  <label class="nsu-qe-label" id="nsuQeLabel">จำนวน (Enter เพื่อไปแก้ราคา)</label>'
+    + '  <input type="number" id="nsuQeInput" value="'+item.qty+'" min="1" step="1">'
+    + '  <div class="nsu-qe-hint" id="nsuQeHint">พิมพ์จำนวน แล้วกด Enter</div>'
+    + '</div>';
+  document.body.appendChild(pop);
+  _f3EditState = { id:id, stage:'qty' };
+  var inp = document.getElementById('nsuQeInput');
+  setTimeout(function(){ inp.focus(); inp.select(); }, 50);
+  inp.addEventListener('keydown', function(e){
+    if(e.key==='Enter'){ e.preventDefault(); nsuQtyEditNext(); }
+    if(e.key==='Escape'){ nsuCloseQtyEdit(); }
+  });
+}
+
+function nsuQtyEditNext(){
+  var item = order.find(function(i){return i.id===_f3EditState.id;});
+  var inp = document.getElementById('nsuQeInput');
+  if(!item || !inp) return;
+
+  if(_f3EditState.stage==='qty'){
+    // บันทึกจำนวน → ไปแก้ราคา
+    var q = parseInt(inp.value)||1;
+    if(q<1) q=1;
+    item.qty = q;
+    _f3EditState.stage = 'price';
+    document.getElementById('nsuQeLabel').textContent = 'ราคาต่อชิ้น (Enter เพื่อบันทึก)';
+    document.getElementById('nsuQeHint').textContent = 'พิมพ์ราคา แล้วกด Enter เพื่อบันทึก';
+    inp.step = '0.5'; inp.min='0';
+    inp.value = item.price;
+    inp.focus(); inp.select();
+    if(typeof calcTotal==='function') calcTotal();
+    nsuRefresh();
+  } else {
+    // บันทึกราคา → จบ กลับไปค้นหา
+    var p = parseFloat(inp.value)||0;
+    item.price = p;
+    item.priceEdited = true;
+    if(typeof calcTotal==='function') calcTotal();
+    nsuRefresh();
+    nsuCloseQtyEdit();
+    showToast('แก้ '+item.name+' แล้ว');
+    // โฟกัสกลับช่องค้นหา
+    var s = document.getElementById('nsuSearch');
+    if(s) setTimeout(function(){ s.focus(); }, 100);
+  }
+}
+
+function nsuCloseQtyEdit(){
+  var pop = document.getElementById('nsuQtyEditPop');
+  if(pop) pop.remove();
+  _f3EditState = null;
+  var s = document.getElementById('nsuSearch');
+  if(s) setTimeout(function(){ s.focus(); }, 100);
+}
+
+
+// ===== ข้อ 2: บัตรสวัสดิการ — แยกช่องเงินสวัสดิการ + เงินสด =====
+// override openPayment('welfare') ให้เปิด dialog กรอก 2 ช่อง
+(function patchWelfare(){
+  var _orig = window.openPayment;
+  window.openPayment = function(method){
+    if(method==='welfare'){
+      if(!order.length){ showToast('ยังไม่มีสินค้าในออเดอร์'); return; }
+      nsuOpenWelfareDialog();
+      return;
+    }
+    _orig.apply(this, arguments);
+  };
+})();
+
+function nsuOpenWelfareDialog(){
+  var total = getTotal();
+  var existing = document.getElementById('nsuWelfarePop');
+  if(existing) existing.remove();
+
+  var pop = document.createElement('div');
+  pop.id = 'nsuWelfarePop';
+  pop.innerHTML = ''
+    + '<div class="nsu-wf-backdrop" onclick="nsuCloseWelfare()"></div>'
+    + '<div class="nsu-wf-box">'
+    + '  <div class="nsu-wf-title">🎫 ชำระด้วยบัตรสวัสดิการ</div>'
+    + '  <div class="nsu-wf-total">ยอดที่ต้องชำระ: <b>'+fmt(total)+'</b></div>'
+    + '  <label class="nsu-wf-label">เงินจากบัตรสวัสดิการ</label>'
+    + '  <input type="number" id="nsuWfWelfare" value="'+total+'" min="0" step="0.5" oninput="nsuWelfareCalc()">'
+    + '  <label class="nsu-wf-label">เงินสดเพิ่ม (ถ้าบัตรไม่พอ)</label>'
+    + '  <input type="number" id="nsuWfCash" value="0" min="0" step="0.5" oninput="nsuWelfareCalc()">'
+    + '  <div class="nsu-wf-summary" id="nsuWfSummary"></div>'
+    + '  <div class="nsu-wf-actions">'
+    + '    <button class="nsu-wf-cancel" onclick="nsuCloseWelfare()">ยกเลิก</button>'
+    + '    <button class="nsu-wf-save" onclick="nsuWelfareConfirm()">ยืนยันชำระ</button>'
+    + '  </div>'
+    + '</div>';
+  document.body.appendChild(pop);
+  nsuWelfareCalc();
+  setTimeout(function(){ var w=document.getElementById('nsuWfWelfare'); if(w){w.focus();w.select();} }, 50);
+}
+
+function nsuWelfareCalc(){
+  var total = getTotal();
+  var welfare = parseFloat(document.getElementById('nsuWfWelfare').value)||0;
+  var cash = parseFloat(document.getElementById('nsuWfCash').value)||0;
+  var paid = welfare + cash;
+  var sum = document.getElementById('nsuWfSummary');
+  if(paid >= total){
+    var change = paid - total;
+    sum.innerHTML = '<span style="color:#2b8a3e">✓ รวมจ่าย '+fmt(paid)+(change>0?' · เงินทอน '+fmt(change):' · พอดี')+'</span>';
+  } else {
+    sum.innerHTML = '<span style="color:#e03131">✗ ขาดอีก '+fmt(total-paid)+'</span>';
+  }
+}
+
+function nsuWelfareConfirm(){
+  var total = getTotal();
+  var welfare = parseFloat(document.getElementById('nsuWfWelfare').value)||0;
+  var cash = parseFloat(document.getElementById('nsuWfCash').value)||0;
+  if(welfare+cash < total){ showToast('เงินไม่พอ ขาดอีก '+fmt(total-welfare-cash)); return; }
+  // บันทึกข้อมูลการจ่าย (welfare + cash)
+  window._welfareBreakdown = { welfare:welfare, cash:cash };
+  currentPayMethod = 'welfare';
+  currentCashInput = welfare + cash;
+  nsuCloseWelfare();
+  if(typeof confirmPayment==='function') confirmPayment('welfare');
+}
+
+function nsuCloseWelfare(){
+  var pop = document.getElementById('nsuWelfarePop');
+  if(pop) pop.remove();
+}
+
+// เพิ่มคีย์ลัดสวัสดิการ (F4 ถูกใช้แยกชำระ → ใช้ Ctrl+W)
+(function addWelfareShortcut(){
+  if(typeof SHORTCUT_ACTIONS==='undefined') return;
+  if(!SHORTCUT_ACTIONS.find(function(a){return a.id==='pay_welfare';})){
+    SHORTCUT_ACTIONS.push({ id:'pay_welfare', name:'บัตรสวัสดิการ', def:'Ctrl+W', group:'💳 การชำระเงิน', run:function(){ if(order.length) openPayment('welfare'); else showToast('ยังไม่มีสินค้าในออเดอร์'); } });
+    if(typeof currentShortcuts!=='undefined' && !currentShortcuts.pay_welfare){
+      currentShortcuts.pay_welfare='Ctrl+W';
+      if(typeof saveShortcuts==='function') saveShortcuts(currentShortcuts);
+    }
+  }
+})();
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 48: ปิด kiosk, welfare Enter, แจ้งไม่พบ, ปักหมุด UI
+// ============================================================
+
+// ===== ข้อ 1: ปุ่มปิดโปรแกรมใน kiosk (window.close ปิดไม่ได้) =====
+// kiosk mode window.close() ถูกบล็อก → ใช้วิธีอื่น
+(function fixCloseButton(){
+  function run(){
+    var btn = document.getElementById('nsuCloseBtn');
+    if(!btn) return;
+    btn.onclick = function(){
+      showConfirm('ปิดโปรแกรม','ต้องการปิดโปรแกรม POS?\n(ถ้าปิดไม่ได้ ให้กด Alt+F4)','⚠️','ปิดโปรแกรม','').then(function(ok){
+        if(!ok) return;
+        // ลองหลายวิธีปิด
+        try{ window.close(); }catch(e){}
+        try{ window.open('','_self'); window.close(); }catch(e){}
+        // kiosk: แสดงข้อความให้กด Alt+F4
+        setTimeout(function(){
+          document.body.innerHTML = '<div style="position:fixed;inset:0;background:#0c447c;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:Sarabun,sans-serif;font-size:24px;text-align:center;padding:20px">'
+            + '<div style="font-size:60px;margin-bottom:20px">👋</div>'
+            + '<div style="font-size:28px;font-weight:700;margin-bottom:12px">ปิดโปรแกรม POS</div>'
+            + '<div style="font-size:18px;opacity:0.9">กด <b>Alt + F4</b> เพื่อปิดหน้าต่าง</div>'
+            + '<div style="font-size:14px;opacity:0.7;margin-top:20px">หรือกดปุ่มด้านล่างเพื่อกลับเข้าโปรแกรม</div>'
+            + '<button onclick="location.reload()" style="margin-top:16px;padding:12px 32px;background:#fff;color:#0c447c;border:none;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;font-family:Sarabun,sans-serif">↩ กลับเข้าโปรแกรม</button>'
+            + '</div>';
+        }, 300);
+      });
+    };
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 800);
+  setTimeout(run, 1500);
+})();
+
+// ===== ข้อ 2: welfare — Enter ในช่องสวัสดิการ → ไปช่องเงินสด → Enter → ยืนยัน =====
+(function patchWelfareEnter(){
+  var _orig = window.nsuOpenWelfareDialog;
+  window.nsuOpenWelfareDialog = function(){
+    _orig.apply(this, arguments);
+    setTimeout(function(){
+      var wf = document.getElementById('nsuWfWelfare');
+      var cash = document.getElementById('nsuWfCash');
+      if(wf){
+        wf.addEventListener('keydown', function(e){
+          if(e.key==='Enter'){ e.preventDefault(); if(cash){ cash.focus(); cash.select(); } }
+          if(e.key==='Escape'){ nsuCloseWelfare(); }
+        });
+      }
+      if(cash){
+        cash.addEventListener('keydown', function(e){
+          if(e.key==='Enter'){ e.preventDefault(); nsuWelfareConfirm(); }
+          if(e.key==='Escape'){ nsuCloseWelfare(); }
+        });
+      }
+    }, 100);
+  };
+})();
+
+// ===== ข้อ 3: ค้นหาไม่พบ → แจ้งเตือน + Enter ปิด+ล้างช่อง =====
+window.nsuSearchKey = function(e){
+  if(e.key!=='Enter') return;
+  var input = e.target;
+  var val = input.value.trim();
+  if(!val) return;
+
+  // แปลงไทย→เลข เฉพาะบาร์โค้ดจริง
+  if(typeof isLikelyThaiBarcode==='function' && isLikelyThaiBarcode(val) && typeof convertThaiBarcodeToDigits==='function'){
+    var conv = convertThaiBarcodeToDigits(val);
+    if(/^[0-9]+$/.test(conv)){ input.value=conv; val=conv; }
+  }
+
+  var found = PRODUCTS.find(function(p){ return p.visible!==false && p.barcode===val; });
+  if(!found){
+    var kw = val.toLowerCase();
+    var matches = PRODUCTS.filter(function(p){
+      return p.visible!==false && (p.name.toLowerCase().indexOf(kw)!==-1 || (p.barcode && p.barcode.indexOf(kw)!==-1));
+    });
+    if(matches.length>=1) found = matches[0];
+  }
+
+  if(found){
+    addToOrder(found.id); showToast('เพิ่ม '+found.name);
+    input.value=''; nsuRefresh(); input.focus(); e.preventDefault();
+  } else {
+    // แจ้งเตือนไม่พบ + Enter ปิด+ล้าง
+    e.preventDefault();
+    nsuShowNotFound(val, input);
+  }
+};
+
+function nsuShowNotFound(val, input){
+  var existing = document.getElementById('nsuNotFoundPop');
+  if(existing) existing.remove();
+  var pop = document.createElement('div');
+  pop.id = 'nsuNotFoundPop';
+  pop.innerHTML = ''
+    + '<div class="nsu-nf-backdrop"></div>'
+    + '<div class="nsu-nf-box">'
+    + '  <div class="nsu-nf-icon">🔍</div>'
+    + '  <div class="nsu-nf-title">ไม่พบสินค้า</div>'
+    + '  <div class="nsu-nf-val">"'+val+'"</div>'
+    + '  <div class="nsu-nf-hint">กด Enter หรือคลิกเพื่อปิด</div>'
+    + '  <button class="nsu-nf-ok" onclick="nsuCloseNotFound()">ตกลง (Enter)</button>'
+    + '</div>';
+  document.body.appendChild(pop);
+  // Enter/Escape/คลิก = ปิด + ล้างช่อง
+  function closeHandler(e){
+    if(e.key==='Enter' || e.key==='Escape'){
+      e.preventDefault();
+      nsuCloseNotFound();
+    }
+  }
+  window._nfCloseHandler = closeHandler;
+  document.addEventListener('keydown', closeHandler, true);
+  pop.querySelector('.nsu-nf-backdrop').onclick = nsuCloseNotFound;
+  window._nfInput = input;
+}
+
+function nsuCloseNotFound(){
+  var pop = document.getElementById('nsuNotFoundPop');
+  if(pop) pop.remove();
+  if(window._nfCloseHandler){ document.removeEventListener('keydown', window._nfCloseHandler, true); window._nfCloseHandler=null; }
+  // ล้างช่องค้นหา + โฟกัสกลับ
+  var input = window._nfInput || document.getElementById('nsuSearch');
+  if(input){ input.value=''; setTimeout(function(){ input.focus(); }, 50); }
+}
+
+
+// ===== ข้อ 4: หน้าเลือกสินค้าขายด่วน (ปักหมุด) แบบติดดาว 20-30 รายการ =====
+if(typeof MAX_PINNED!=='undefined'){ try{ MAX_PINNED = 30; }catch(e){} }
+window.MAX_PINNED_NEW = 30;
+
+function nsuOpenPinManager(){
+  var existing = document.getElementById('nsuPinPop');
+  if(existing) existing.remove();
+  var pop = document.createElement('div');
+  pop.id = 'nsuPinPop';
+  pop.innerHTML = ''
+    + '<div class="nsu-pin-backdrop" onclick="nsuClosePinManager()"></div>'
+    + '<div class="nsu-pin-box">'
+    + '  <div class="nsu-pin-header">'
+    + '    <span>⭐ เลือกสินค้าขายด่วน (<span id="nsuPinCount">0</span>/30)</span>'
+    + '    <button onclick="nsuClosePinManager()" class="nsu-pin-close">✕</button>'
+    + '  </div>'
+    + '  <input type="text" id="nsuPinSearch" placeholder="🔍 ค้นหาสินค้าเพื่อปักหมุด..." oninput="nsuRenderPinList()">'
+    + '  <div class="nsu-pin-list" id="nsuPinList"></div>'
+    + '  <div class="nsu-pin-footer">'
+    + '    <span style="font-size:12px;color:#868e96">แตะดาว ☆ เพื่อเพิ่ม/เอาออก · สูงสุด 30 รายการ</span>'
+    + '    <button onclick="nsuClosePinManager()" class="nsu-pin-done">เสร็จ</button>'
+    + '  </div>'
+    + '</div>';
+  document.body.appendChild(pop);
+  nsuRenderPinList();
+}
+
+function nsuRenderPinList(){
+  var kw = (document.getElementById('nsuPinSearch') ? document.getElementById('nsuPinSearch').value : '').trim().toLowerCase();
+  var list = document.getElementById('nsuPinList');
+  if(!list) return;
+  // แสดงสินค้าที่ปักหมุดก่อน แล้วผลค้นหา
+  var items;
+  if(kw){
+    items = PRODUCTS.filter(function(p){
+      return p.visible!==false && (p.name.toLowerCase().indexOf(kw)!==-1 || (p.barcode&&p.barcode.indexOf(kw)!==-1));
+    }).slice(0,60);
+  } else {
+    // ไม่ค้นหา → แสดงที่ปักหมุดแล้ว + สินค้า 40 ตัวแรก
+    var pinned = pinnedIds.map(function(id){return PRODUCTS.find(function(p){return p.id===id;});}).filter(Boolean);
+    var others = PRODUCTS.filter(function(p){return p.visible!==false && pinnedIds.indexOf(p.id)===-1;}).slice(0,40);
+    items = pinned.concat(others);
+  }
+  document.getElementById('nsuPinCount').textContent = pinnedIds.length;
+  if(!items.length){ list.innerHTML='<div style="text-align:center;padding:20px;color:#868e96">ไม่พบสินค้า</div>'; return; }
+  list.innerHTML = items.map(function(p){
+    var pin = isPinned(p.id);
+    return '<div class="nsu-pin-item'+(pin?' pinned':'')+'" onclick="nsuTogglePinItem('+p.id+')">'
+      + '<span class="nsu-pin-star">'+(pin?'★':'☆')+'</span>'
+      + '<span class="nsu-pin-name">'+p.name+'</span>'
+      + '<span class="nsu-pin-price">฿'+p.price+'</span>'
+      + '</div>';
+  }).join('');
+}
+
+function nsuTogglePinItem(id){
+  var idx = pinnedIds.indexOf(id);
+  if(idx>=0){ pinnedIds.splice(idx,1); }
+  else {
+    if(pinnedIds.length>=30){ showToast('ปักหมุดได้สูงสุด 30 รายการ'); return; }
+    pinnedIds.push(id);
+  }
+  if(typeof savePinned==='function') savePinned(pinnedIds);
+  nsuRenderPinList();
+  nsuRenderProducts(''); // อัปเดตหน้าขาย
+}
+
+function nsuClosePinManager(){
+  var pop = document.getElementById('nsuPinPop');
+  if(pop) pop.remove();
+  nsuRefresh();
+}
+
+// เพิ่มปุ่ม "⭐ เลือกขายด่วน" ในหน้าปลีก-ส่ง (ใต้ปุ่มระดับราคา)
+(function addPinManagerBtn(){
+  function run(){
+    var tierArea = document.querySelector('#newSellUI .nsu-pricetier');
+    if(!tierArea || document.getElementById('nsuPinMgrBtn')) return;
+    var btn = document.createElement('button');
+    btn.id = 'nsuPinMgrBtn';
+    btn.innerHTML = '⭐ เลือกสินค้าขายด่วน';
+    btn.style.cssText = 'width:100%;margin-top:8px;padding:10px;background:linear-gradient(135deg,#f59f00,#ffd43b);color:#5c3c00;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;font-family:Sarabun,sans-serif';
+    btn.onclick = function(){ nsuOpenPinManager(); };
+    tierArea.parentNode.insertBefore(btn, tierArea.nextSibling);
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 600);
+  setTimeout(run, 1500);
+})();
+
+
 </script>
 
 
@@ -14366,6 +14816,57 @@ body.newui-active { overflow: hidden; }
 .nsu-pe-actions { display:flex; gap:8px; }
 .nsu-pe-cancel { flex:1; padding:12px; border:1.5px solid #dee2e6; background:#f8f9fa; color:#495057; border-radius:10px; font-size:14px; cursor:pointer; font-family:'Sarabun',sans-serif; }
 .nsu-pe-save { flex:2; padding:12px; border:none; background:linear-gradient(135deg,#2f9e44,#51cf66); color:#fff; border-radius:10px; font-size:14px; font-weight:600; cursor:pointer; font-family:'Sarabun',sans-serif; }
+</style>
+
+
+<!-- PART 47 CSS: dialog แก้จำนวน + welfare -->
+<style id="posV3Part47">
+/* dialog แก้จำนวน (F3) */
+#nsuQtyEditPop, #nsuWelfarePop { position:fixed; inset:0; z-index:1300; display:flex; align-items:center; justify-content:center; }
+.nsu-qe-backdrop, .nsu-wf-backdrop { position:absolute; inset:0; background:rgba(0,0,0,0.35); }
+.nsu-qe-box, .nsu-wf-box { position:relative; background:#fff; border-radius:14px; padding:22px; width:340px; max-width:92vw; box-shadow:0 10px 40px rgba(0,0,0,0.25); font-family:'Sarabun',sans-serif; }
+.nsu-qe-title, .nsu-wf-title { font-size:16px; font-weight:600; color:#0c447c; margin-bottom:14px; }
+.nsu-qe-label, .nsu-wf-label { font-size:12px; color:#495057; display:block; margin-bottom:6px; margin-top:10px; }
+.nsu-qe-box input, .nsu-wf-box input { width:100%; text-align:center; font-size:26px; font-weight:700; padding:12px; border:2px solid #4dabf7; border-radius:10px; outline:none; box-sizing:border-box; }
+.nsu-qe-hint { font-size:11px; color:#868e96; margin-top:8px; text-align:center; }
+.nsu-wf-total { font-size:14px; color:#495057; margin-bottom:8px; }
+.nsu-wf-total b { color:#0c447c; font-size:18px; }
+.nsu-wf-summary { margin:12px 0; padding:10px; background:#f8f9fa; border-radius:8px; text-align:center; font-size:14px; font-weight:600; }
+.nsu-wf-actions, .nsu-qe-actions { display:flex; gap:8px; margin-top:16px; }
+.nsu-wf-cancel { flex:1; padding:12px; border:1.5px solid #dee2e6; background:#f8f9fa; color:#495057; border-radius:10px; font-size:14px; cursor:pointer; font-family:'Sarabun',sans-serif; }
+.nsu-wf-save { flex:2; padding:12px; border:none; background:linear-gradient(135deg,#0ca678,#20c997); color:#fff; border-radius:10px; font-size:14px; font-weight:600; cursor:pointer; font-family:'Sarabun',sans-serif; }
+#nsuCloseBtn:hover { background:rgba(255,50,50,1) !important; }
+</style>
+
+
+<!-- PART 48 CSS: ไม่พบสินค้า + ปักหมุด -->
+<style id="posV3Part48">
+/* แจ้งเตือนไม่พบสินค้า */
+#nsuNotFoundPop { position:fixed; inset:0; z-index:1400; display:flex; align-items:center; justify-content:center; }
+.nsu-nf-backdrop { position:absolute; inset:0; background:rgba(0,0,0,0.4); }
+.nsu-nf-box { position:relative; background:#fff; border-radius:16px; padding:28px; width:320px; max-width:90vw; text-align:center; box-shadow:0 10px 40px rgba(0,0,0,0.3); font-family:'Sarabun',sans-serif; }
+.nsu-nf-icon { font-size:48px; margin-bottom:8px; }
+.nsu-nf-title { font-size:18px; font-weight:700; color:#e03131; margin-bottom:8px; }
+.nsu-nf-val { font-size:14px; color:#495057; margin-bottom:6px; font-family:monospace; background:#f8f9fa; padding:6px 12px; border-radius:8px; display:inline-block; }
+.nsu-nf-hint { font-size:12px; color:#868e96; margin:12px 0; }
+.nsu-nf-ok { width:100%; padding:12px; background:linear-gradient(135deg,#1971c2,#4dabf7); color:#fff; border:none; border-radius:10px; font-size:15px; font-weight:600; cursor:pointer; font-family:'Sarabun',sans-serif; }
+
+/* ปักหมุด */
+#nsuPinPop { position:fixed; inset:0; z-index:1400; display:flex; align-items:center; justify-content:center; }
+.nsu-pin-backdrop { position:absolute; inset:0; background:rgba(0,0,0,0.4); }
+.nsu-pin-box { position:relative; background:#fff; border-radius:16px; padding:0; width:480px; max-width:94vw; max-height:80vh; display:flex; flex-direction:column; box-shadow:0 10px 40px rgba(0,0,0,0.3); font-family:'Sarabun',sans-serif; overflow:hidden; }
+.nsu-pin-header { display:flex; align-items:center; justify-content:space-between; background:linear-gradient(135deg,#f59f00,#ffd43b); color:#5c3c00; padding:14px 18px; font-size:15px; font-weight:700; }
+.nsu-pin-close { background:rgba(255,255,255,0.3); border:none; color:#5c3c00; width:30px; height:30px; border-radius:8px; cursor:pointer; font-size:16px; }
+#nsuPinSearch { margin:12px 16px; padding:10px 14px; border:1.5px solid #dee2e6; border-radius:10px; font-size:14px; font-family:'Sarabun',sans-serif; outline:none; }
+.nsu-pin-list { flex:1; overflow-y:auto; padding:0 16px; }
+.nsu-pin-item { display:flex; align-items:center; gap:12px; padding:10px 12px; border-bottom:0.5px solid #f1f3f5; cursor:pointer; border-radius:8px; }
+.nsu-pin-item:hover { background:#fff9db; }
+.nsu-pin-item.pinned { background:#fff3bf; }
+.nsu-pin-star { font-size:22px; color:#f59f00; width:24px; }
+.nsu-pin-name { flex:1; font-size:14px; }
+.nsu-pin-price { font-size:14px; font-weight:600; color:#1971c2; }
+.nsu-pin-footer { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-top:0.5px solid #f1f3f5; }
+.nsu-pin-done { padding:10px 28px; background:linear-gradient(135deg,#f59f00,#ffd43b); color:#5c3c00; border:none; border-radius:10px; font-size:14px; font-weight:600; cursor:pointer; font-family:'Sarabun',sans-serif; }
 </style>
 
 </body>
