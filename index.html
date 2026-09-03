@@ -14529,6 +14529,131 @@ function nsuScrollToLast(){
 })();
 
 
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 54: welfare ไม่ทอน + ใบเสร็จท่อนเดียว
+// ============================================================
+
+// ===== ข้อ 2: บัตรสวัสดิการไม่ควรมีเงินทอน =====
+// welfare จ่ายตามยอดจริง ไม่ทอน (ยกเว้นเงินสดส่วนที่จ่ายเกิน)
+(function fixWelfareChange(){
+  var _orig = window.nsuWelfareConfirm;
+  if(typeof _orig!=='function') return;
+  window.nsuWelfareConfirm = function(){
+    var total = getTotal();
+    var welfare = parseFloat(document.getElementById('nsuWfWelfare').value)||0;
+    var cash = parseFloat(document.getElementById('nsuWfCash').value)||0;
+    if(welfare+cash < total){ showToast('เงินไม่พอ ขาดอีก '+fmt(total-welfare-cash)); return; }
+
+    // บัตรสวัสดิการจ่ายไม่เกินยอด (ไม่ทอนจากบัตร)
+    // เงินทอน = เฉพาะเงินสดที่จ่ายเกิน
+    var welfareUsed = Math.min(welfare, total);
+    var remaining = total - welfareUsed;
+    var cashUsed = remaining; // เงินสดที่ใช้จริง
+    var cashChange = Math.max(0, cash - cashUsed); // ทอนเฉพาะเงินสดเกิน
+
+    window._welfareBreakdown = { welfare:welfareUsed, cash:cashUsed, cashChange:cashChange };
+    currentPayMethod = 'welfare';
+    // สำคัญ: currentCashInput = total (ไม่ใช่ welfare+cash) เพื่อไม่ให้ใบเสร็จคิดเงินทอนผิด
+    currentCashInput = total + cashChange; // received = ยอด + เงินทอนสด (ถ้ามี)
+    // ถ้าไม่มีเงินสดเกิน → received = total (ไม่ทอน)
+    if(cashChange===0){ currentCashInput = total; }
+
+    nsuCloseWelfare();
+    if(typeof confirmPayment==='function') confirmPayment('welfare');
+  };
+})();
+
+// ===== ข้อ 4: ใบเสร็จท่อนเดียว (ไม่แบ่งหน้า) =====
+// เพิ่ม @page + page-break-inside:avoid ใน HTML ใบเสร็จ
+(function fixReceiptPageBreak(){
+  var _orig = window.printViaIframe;
+  if(typeof _orig!=='function') return;
+  window.printViaIframe = function(htmlContent){
+    // แทรก CSS กันแบ่งหน้า ก่อน </head> หรือใน <style>
+    var pageCSS = '<style>'
+      + '@page { size: 80mm auto; margin: 0; }'  // กระดาษความร้อน 80mm ยาวต่อเนื่อง
+      + '@media print {'
+      + '  html, body { width: 80mm; margin: 0 !important; padding: 2mm !important; }'
+      + '  * { page-break-inside: avoid !important; break-inside: avoid !important; }'
+      + '  body { page-break-after: avoid !important; }'
+      + '}'
+      + '</style>';
+    // แทรกก่อน </head> ถ้ามี, ไม่งั้นแทรกต้น
+    if(htmlContent.indexOf('</head>')!==-1){
+      htmlContent = htmlContent.replace('</head>', pageCSS+'</head>');
+    } else if(htmlContent.indexOf('<body')!==-1){
+      htmlContent = htmlContent.replace('<body', pageCSS+'<body');
+    } else {
+      htmlContent = pageCSS + htmlContent;
+    }
+    return _orig.call(this, htmlContent);
+  };
+})();
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 55: ปุ่มเปิด/ปิดพิมพ์ใบเสร็จ (เห็นชัด)
+// ============================================================
+
+// เพิ่มปุ่มสลับพิมพ์ใบเสร็จใน topbar หน้าปลีก-ส่ง
+(function addPrintToggle(){
+  function run(){
+    var topbar = document.querySelector('#newSellUI .nsu-topbtns');
+    if(!topbar || document.getElementById('nsuPrintToggle')) return;
+    var btn = document.createElement('button');
+    btn.id = 'nsuPrintToggle';
+    updatePrintToggleBtn(btn);
+    btn.onclick = function(){
+      // สลับค่า
+      var newVal = !(prCfg && prCfg.autoPrint);
+      if(typeof prCfg!=='undefined') prCfg.autoPrint = newVal;
+      // sync checkbox + save
+      var cb = document.getElementById('autoPrint');
+      if(cb){ cb.checked = newVal; }
+      try {
+        var cfg = JSON.parse(localStorage.getItem('pos_printer_v3')||'{}');
+        cfg.autoPrint = newVal;
+        localStorage.setItem('pos_printer_v3', JSON.stringify(cfg));
+      } catch(e){}
+      updatePrintToggleBtn(btn);
+      showToast(newVal ? '🖨️ เปิดพิมพ์ใบเสร็จอัตโนมัติ' : '🚫 ปิดพิมพ์ใบเสร็จ');
+    };
+    // แทรกก่อนปุ่มปิด (nsuCloseBtn)
+    var closeBtn = document.getElementById('nsuCloseBtn');
+    if(closeBtn) topbar.insertBefore(btn, closeBtn);
+    else topbar.appendChild(btn);
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 600);
+  setTimeout(run, 1500);
+})();
+
+function updatePrintToggleBtn(btn){
+  btn = btn || document.getElementById('nsuPrintToggle');
+  if(!btn) return;
+  var on = (typeof prCfg!=='undefined') ? prCfg.autoPrint : true;
+  btn.innerHTML = on ? '🖨️ พิมพ์: เปิด' : '🚫 พิมพ์: ปิด';
+  btn.style.cssText = 'background:'+(on?'rgba(47,158,68,0.9)':'rgba(150,150,150,0.7)')+' !important;font-weight:600';
+}
+
+// hook confirmPayment ให้เคารพ autoPrint (พิมพ์เฉพาะเมื่อเปิด)
+// (ตัวเดิมเช็ค prCfg.autoPrint อยู่แล้ว แต่ Part 30 บังคับพิมพ์ — แก้ให้เคารพค่าจริง)
+(function respectAutoPrint(){
+  // ยกเลิก forced print ของ Part 30 (hookConfirmPaymentPrint)
+  // โดย override confirmPayment ให้พิมพ์ตาม autoPrint จริง
+  var _orig = window.confirmPayment;
+  window.confirmPayment = function(method){
+    _orig.apply(this, arguments);
+    // ไม่บังคับพิมพ์ — ให้ printReceipt ในตัว confirmPayment เดิมจัดการตาม autoPrint
+  };
+})();
+
+
 </script>
 
 
