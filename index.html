@@ -14487,6 +14487,48 @@ window.stopCamScan = function(){
 })();
 
 
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 53: เลื่อนตารางออเดอร์ลงล่างสุด (แก้ใหม่)
+// ============================================================
+// วิธีใหม่: เลื่อนไปที่แถวสุดท้ายโดยตรง (scrollIntoView) แม่นกว่าคำนวณ scrollHeight
+
+function nsuScrollToLast(){
+  var rows = document.getElementById('nsuOrderRows');
+  if(!rows) return;
+  var lastRow = rows.lastElementChild;
+  if(lastRow && lastRow.scrollIntoView){
+    try { lastRow.scrollIntoView({ block:'nearest', behavior:'auto' }); } catch(e){}
+  }
+  // เสริม: เลื่อน container ลงล่างสุดด้วย (เผื่อ scrollIntoView ไม่พอ)
+  var table = document.querySelector('#newSellUI .nsu-ordertable');
+  if(table){ table.scrollTop = table.scrollHeight + 500; }
+}
+
+// hook addToOrder — เลื่อนหลังเพิ่ม (หลาย timing กันพลาด)
+(function hookAddScrollNew(){
+  var _orig = window.addToOrder;
+  window.addToOrder = function(){
+    _orig.apply(this, arguments);
+    requestAnimationFrame(function(){
+      nsuScrollToLast();
+      setTimeout(nsuScrollToLast, 80);
+      setTimeout(nsuScrollToLast, 200);
+    });
+  };
+})();
+
+// hook nsuRenderOrder — เลื่อนหลัง render เสร็จ
+(function hookRenderScrollNew(){
+  var _orig = window.nsuRenderOrder;
+  window.nsuRenderOrder = function(){
+    if(typeof _orig==='function') _orig.apply(this, arguments);
+    requestAnimationFrame(nsuScrollToLast);
+  };
+})();
+
+
 </script>
 
 
