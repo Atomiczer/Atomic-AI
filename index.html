@@ -14183,6 +14183,310 @@ document.addEventListener('keydown', function(e){
 }, true); // capture phase = ทำงานก่อน handler ล้างออเดอร์
 
 
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 50: เลื่อนตารางออเดอร์ลงล่างสุดเมื่อเพิ่มสินค้า
+// ============================================================
+
+function nsuScrollOrderToBottom(){
+  var table = document.querySelector('#newSellUI .nsu-ordertable');
+  if(table){ table.scrollTop = table.scrollHeight; }
+}
+
+// hook addToOrder ให้เลื่อนลงล่างหลังเพิ่ม
+(function hookAddScroll(){
+  var _orig = window.addToOrder;
+  window.addToOrder = function(){
+    _orig.apply(this, arguments);
+    // เลื่อนลงล่างหลัง render เสร็จ
+    setTimeout(nsuScrollOrderToBottom, 60);
+    setTimeout(nsuScrollOrderToBottom, 150);
+  };
+})();
+
+// hook nsuRefresh ให้เลื่อนด้วย (เผื่อเพิ่มผ่านทางอื่น)
+(function hookRefreshScroll(){
+  var _orig = window.nsuRefresh;
+  window.nsuRefresh = function(){
+    if(typeof _orig==='function') _orig();
+    setTimeout(nsuScrollOrderToBottom, 50);
+  };
+})();
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 51: สแกนบาร์โค้ด iPhone/Safari (html5-qrcode)
+// ============================================================
+// ปัญหา: iPhone Safari ไม่มี BarcodeDetector + ZXing โหลด/ทำงานไม่เสถียร
+// แก้: ใช้ html5-qrcode ที่รองรับ iOS Safari ดีที่สุด
+
+var h5qrScanner = null;
+var h5qrLoaded = false;
+
+// โหลด html5-qrcode
+function loadHtml5Qrcode(){
+  return new Promise(function(resolve, reject){
+    if(window.Html5Qrcode){ resolve(); return; }
+    var cdns = [
+      'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js',
+      'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js',
+      'https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js'
+    ];
+    var i=0;
+    function tryLoad(){
+      if(i>=cdns.length){ reject(new Error('โหลด html5-qrcode ไม่ได้')); return; }
+      var s=document.createElement('script');
+      s.src=cdns[i];
+      s.onload=function(){ if(window.Html5Qrcode) resolve(); else { i++; tryLoad(); } };
+      s.onerror=function(){ i++; tryLoad(); };
+      document.head.appendChild(s);
+    }
+    tryLoad();
+  });
+}
+
+// override openCamScanFor ให้ใช้ html5-qrcode
+window.openCamScanFor = function(target){
+  camScanTarget = target || 'sell';
+  var cam = document.getElementById('camScanModal');
+  if(cam) cam.style.zIndex = '9999';
+  openModal('camScanModal');
+  startH5QrScan();
+};
+
+async function startH5QrScan(){
+  var statusEl = document.getElementById('camScanStatus');
+  var modeEl = document.getElementById('camScanMode');
+  var resultEl = document.getElementById('camScanResult');
+  if(resultEl) resultEl.style.display='none';
+  if(statusEl) statusEl.textContent = 'กำลังโหลดตัวสแกน...';
+
+  // ต้อง HTTPS
+  var isSecure = (location.protocol==='https:' || location.hostname==='localhost' || location.hostname==='127.0.0.1');
+  if(!isSecure){
+    if(statusEl) statusEl.innerHTML = '<span style="color:#e03131">❌ ต้องเปิดผ่าน https:// เท่านั้น</span>';
+    return;
+  }
+
+  try {
+    await loadHtml5Qrcode();
+  } catch(e){
+    if(statusEl) statusEl.innerHTML = '<span style="color:#e03131">❌ โหลดตัวสแกนไม่ได้ (เช็คเน็ต)</span><br><button onclick="startH5QrScan()" style="margin-top:8px;padding:6px 16px;background:#1565c0;color:#fff;border:none;border-radius:8px;cursor:pointer;font-family:Sarabun,sans-serif">🔄 ลองใหม่</button>';
+    return;
+  }
+
+  // ซ่อน video เดิม ใช้ container ของ html5-qrcode แทน
+  var wrap = document.getElementById('scannerWrap');
+  if(wrap){
+    // สร้าง container สำหรับ html5-qrcode
+    if(!document.getElementById('h5qrReader')){
+      var reader = document.createElement('div');
+      reader.id = 'h5qrReader';
+      reader.style.cssText = 'width:100%;height:100%';
+      // ซ่อน video เดิม
+      var oldVideo = document.getElementById('scannerVideo');
+      if(oldVideo) oldVideo.style.display='none';
+      wrap.insertBefore(reader, wrap.firstChild);
+    }
+  }
+
+  if(statusEl) statusEl.textContent = 'กำลังเปิดกล้อง...';
+  if(modeEl) modeEl.textContent = 'โหมด: html5-qrcode (iOS/Android)';
+
+  // หยุดตัวเก่าถ้ามี
+  await stopH5QrScan();
+
+  try {
+    h5qrScanner = new Html5Qrcode('h5qrReader', {
+      formatsToSupport: [
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.UPC_E,
+        Html5QrcodeSupportedFormats.CODE_93,
+        Html5QrcodeSupportedFormats.ITF,
+        Html5QrcodeSupportedFormats.CODABAR,
+        Html5QrcodeSupportedFormats.QR_CODE
+      ]
+    });
+
+    var config = {
+      fps: 10,
+      qrbox: function(w,h){ var m=Math.min(w,h); return { width: Math.floor(w*0.8), height: Math.floor(m*0.5) }; },
+      aspectRatio: 1.333,
+      videoConstraints: { facingMode: 'environment' }
+    };
+
+    await h5qrScanner.start(
+      { facingMode: 'environment' },
+      config,
+      function(decodedText){
+        onH5QrScanned(decodedText);
+      },
+      function(err){ /* ignore scan errors (ทุกเฟรมที่ไม่เจอ) */ }
+    );
+    if(statusEl) statusEl.textContent = '📷 เล็งบาร์โค้ดเข้ากรอบ';
+  } catch(err){
+    var msg = err && err.message ? err.message : String(err);
+    if(msg.indexOf('NotAllowed')!==-1 || msg.indexOf('Permission')!==-1)
+      msg = 'ไม่ได้รับอนุญาตใช้กล้อง — กด "อนุญาต" ตอนเบราว์เซอร์ถาม';
+    else if(msg.indexOf('NotFound')!==-1)
+      msg = 'ไม่พบกล้อง';
+    if(statusEl) statusEl.innerHTML = '<span style="color:#e03131">❌ '+msg+'</span><br><button onclick="startH5QrScan()" style="margin-top:8px;padding:6px 16px;background:#1565c0;color:#fff;border:none;border-radius:8px;cursor:pointer;font-family:Sarabun,sans-serif">🔄 ลองใหม่</button>';
+  }
+}
+
+var _h5LastCode='', _h5LastTime=0;
+function onH5QrScanned(rawCode){
+  var code = String(rawCode).trim();
+  if(typeof convertThaiBarcodeToDigits==='function') code = convertThaiBarcodeToDigits(code);
+  // กันซ้ำเร็วเกิน
+  var now=Date.now();
+  if(code===_h5LastCode && (now-_h5LastTime)<1500) return;
+  _h5LastCode=code; _h5LastTime=now;
+
+  // beep + สั่น
+  if(typeof playBeep==='function') playBeep();
+  if(navigator.vibrate) navigator.vibrate(80);
+
+  // แสดงผล
+  var resultEl = document.getElementById('camScanResult');
+  var codeEl = document.getElementById('camScanCode');
+  var foundEl = document.getElementById('camScanFound');
+  if(resultEl) resultEl.style.display='block';
+  if(codeEl) codeEl.textContent=code;
+
+  var found = PRODUCTS.find(function(p){ return p.barcode===code; });
+
+  if(camScanTarget==='sell'){
+    if(found){
+      if(foundEl) foundEl.innerHTML='<span style="color:#2e7d32">✅ '+found.name+' — ฿'+found.price+'</span>';
+      addToOrder(found.id);
+      if(typeof nsuRefresh==='function') nsuRefresh();
+      if(typeof renderProducts==='function') renderProducts();
+    } else {
+      if(foundEl) foundEl.innerHTML='<span style="color:#e65100">⚠️ ไม่พบสินค้าบาร์โค้ดนี้</span>';
+    }
+  } else if(camScanTarget==='quickadd'){
+    var qa = document.getElementById('qaBarcode');
+    if(qa){ qa.value=code; if(typeof qaBarcodeInput==='function') qaBarcodeInput(); }
+    stopH5QrScan();
+    closeModal('camScanModal');
+    if(foundEl) foundEl.textContent='';
+  }
+}
+
+async function stopH5QrScan(){
+  if(h5qrScanner){
+    try { await h5qrScanner.stop(); } catch(e){}
+    try { h5qrScanner.clear(); } catch(e){}
+    h5qrScanner = null;
+  }
+}
+
+// override stopCamScan ให้หยุด html5-qrcode ด้วย
+var _origStopCam = window.stopCamScan;
+window.stopCamScan = function(){
+  stopH5QrScan();
+  if(typeof _origStopCam==='function') try{ _origStopCam(); }catch(e){}
+};
+
+// ปิดกล้องเมื่อปิด modal
+(function hookCloseCamModal(){
+  function run(){
+    var closeBtn = document.querySelector('#camScanModal .modal-close');
+    if(closeBtn){ closeBtn.onclick = function(){ stopH5QrScan(); closeModal('camScanModal'); }; }
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 800);
+})();
+
+
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 52: หน้าเพิ่มสินค้าไม่บังหน้าสแกน
+// ============================================================
+// แก้: ตอนเปิดกล้องจาก quickadd → ซ่อน quickAddModal ชั่วคราว
+//      ปิดกล้อง → แสดง quickAddModal กลับ
+
+// override openCamScanFor: ซ่อน quickAdd ถ้าเปิดกล้องจากในนั้น
+(function patchCamOverQuickAdd(){
+  var _orig = window.openCamScanFor;
+  window.openCamScanFor = function(target){
+    // ถ้าเปิดกล้องจาก quickadd → ซ่อน quickAddModal ชั่วคราว
+    if(target==='quickadd'){
+      var qa = document.getElementById('quickAddModal');
+      if(qa){ qa.style.visibility='hidden'; qa.dataset.hiddenForScan='1'; }
+    }
+    _orig.apply(this, arguments);
+    // ยก camScan สูงสุดแน่นอน
+    var cam = document.getElementById('camScanModal');
+    if(cam){ cam.style.zIndex='99999'; }
+  };
+})();
+
+// เมื่อปิดกล้อง → แสดง quickAdd กลับ
+(function patchStopCamShowQuickAdd(){
+  var _orig = window.stopCamScan;
+  window.stopCamScan = function(){
+    if(typeof _orig==='function') try{ _orig(); }catch(e){}
+    // แสดง quickAdd กลับถ้าเคยซ่อน
+    var qa = document.getElementById('quickAddModal');
+    if(qa && qa.dataset.hiddenForScan==='1'){
+      qa.style.visibility='';
+      delete qa.dataset.hiddenForScan;
+    }
+  };
+})();
+
+// เมื่อ onH5QrScanned (quickadd) เสร็จ → แสดง quickAdd กลับ
+(function patchScannedShowQuickAdd(){
+  var _orig = window.onH5QrScanned;
+  if(typeof _orig!=='function') return;
+  window.onH5QrScanned = function(code){
+    _orig.apply(this, arguments);
+    if(camScanTarget==='quickadd'){
+      setTimeout(function(){
+        var qa = document.getElementById('quickAddModal');
+        if(qa && qa.dataset.hiddenForScan==='1'){
+          qa.style.visibility='';
+          delete qa.dataset.hiddenForScan;
+        }
+      }, 300);
+    }
+  };
+})();
+
+// ปุ่มปิด/กรอกเอง ในหน้าสแกน → แสดง quickAdd กลับ
+(function patchCloseButtons(){
+  function run(){
+    var cam = document.getElementById('camScanModal');
+    if(!cam) return;
+    var closeBtn = cam.querySelector('.modal-close');
+    if(closeBtn && !closeBtn.dataset.qaPatched){
+      closeBtn.dataset.qaPatched='1';
+      var _oldClick = closeBtn.onclick;
+      closeBtn.onclick = function(){
+        stopCamScan();
+        closeModal('camScanModal');
+        var qa = document.getElementById('quickAddModal');
+        if(qa && qa.dataset.hiddenForScan==='1'){ qa.style.visibility=''; delete qa.dataset.hiddenForScan; }
+      };
+    }
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 800);
+})();
+
+
 </script>
 
 
