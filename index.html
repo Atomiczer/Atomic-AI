@@ -1161,6 +1161,13 @@
         <div class="prod-form" id="prodFormWrap">
           <h4 id="prodFormTitle">➕ เพิ่มสินค้าใหม่</h4>
           <div class="form-grid">
+            <div class="form-field" style="grid-column:1/-1">
+              <label>🔖 รหัสบาร์โค้ด (ยิงหรือพิมพ์ก่อน)</label>
+              <div class="barcode-field">
+                <input class="fm-input" type="text" id="pfBarcode" placeholder="ยิงบาร์โค้ด หรือพิมพ์ เช่น 8851234567890" style="font-family:monospace;letter-spacing:1px">
+                <button class="barcode-gen-btn" onclick="generateBarcode()">🎲 สร้างอัตโนมัติ</button>
+              </div>
+            </div>
             <div class="form-field"><label>ชื่อสินค้า *</label><input class="fm-input" type="text" id="pfName" placeholder="ชื่อสินค้า"></div>
             <div class="form-field"><label>ราคา (บาท) *</label><input class="fm-input" type="number" id="pfPrice" placeholder="0" min="0"></div>
             <div class="form-field"><label>อีโมจิ</label>
@@ -1201,13 +1208,6 @@
     </div>
   </div>
 </div>
-            <div class="form-field" style="grid-column:1/-1">
-              <label>🔖 รหัสบาร์โค้ด</label>
-              <div class="barcode-field">
-                <input class="fm-input" type="text" id="pfBarcode" placeholder="เช่น 8851234567890" style="font-family:monospace;letter-spacing:1px">
-                <button class="barcode-gen-btn" onclick="generateBarcode()">🎲 สร้างอัตโนมัติ</button>
-              </div>
-            </div>
           </div>
           <input type="hidden" id="pfEditId" value="">
           <div style="display:flex;gap:8px;">
