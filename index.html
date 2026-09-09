@@ -1220,9 +1220,9 @@
   <button onclick="document.getElementById('pmSearchInput').value='';filterProdTable('')" style="padding:7px 12px;border:1.5px solid var(--border);border-radius:20px;background:var(--bg);cursor:pointer;font-size:12px;color:var(--text-muted)">✕ ล้าง</button>
 </div>
 <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">สินค้าทั้งหมด: <strong id="pmCount">0</strong> รายการ</div>
-        <div style="overflow-x:auto;max-height:320px;overflow-y:auto;">
+        <div style="overflow-x:auto;overflow-y:auto;">
           <table class="prod-table">
-            <thead><tr><th>สินค้า</th><th>หมวด</th><th>ราคา</th><th>สต๊อก</th><th>บาร์โค้ด</th><th>จัดการ</th></tr></thead>
+            <thead><tr><th style="width:36px;text-align:center">☑</th><th>สินค้า</th><th>หมวด</th><th>ราคา</th><th>สต๊อก</th><th>บาร์โค้ด</th><th>จัดการ</th></tr></thead>
             <tbody id="prodTableBody"></tbody>
           </table>
         </div>
@@ -14654,6 +14654,146 @@ function updatePrintToggleBtn(btn){
 })();
 
 
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 58: เลือกหลายสินค้า + ย้ายหมวดหมู่ (bulk)
+// ============================================================
+
+var _bulkSelectedIds = {}; // {id: true}
+
+// override renderProdTable ให้มี checkbox + แถบเครื่องมือ
+window.renderProdTable = function(){
+  var tbody = document.getElementById('prodTableBody');
+  if(!tbody) return;
+  var searchEl = document.getElementById('pmSearchInput');
+  var kw = searchEl ? searchEl.value.trim().toLowerCase() : '';
+
+  // แสดงแถบเครื่องมือ bulk
+  ensureBulkBar();
+
+  if(!kw){
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted)">'
+      + '🔍 มีสินค้า <b>'+PRODUCTS.length+'</b> รายการ<br>'
+      + '<span style="font-size:12px">พิมพ์ค้นหา หรือกด "แสดงทั้งหมด" เพื่อจัดการหมวดหมู่</span><br>'
+      + '<button onclick="pmShowAllForBulk()" style="margin-top:10px;padding:8px 18px;background:#185FA5;color:#fff;border:none;border-radius:8px;font-size:13px;cursor:pointer;font-family:Sarabun,sans-serif">📋 แสดงทั้งหมด (เพื่อย้ายหมวด)</button>'
+      + '</td></tr>';
+    return;
+  }
+  renderProdTableBulk(kw, false);
+};
+
+// แสดงทั้งหมดเพื่อ bulk (จำกัด 300 กันค้าง)
+function pmShowAllForBulk(){
+  renderProdTableBulk('', true);
+}
+
+function renderProdTableBulk(kw, showAll){
+  var tbody = document.getElementById('prodTableBody');
+  var list = [];
+  var limit = showAll ? 300 : 100;
+  for(var i=0;i<PRODUCTS.length && list.length<limit;i++){
+    var p = PRODUCTS[i];
+    if(!kw || p.name.toLowerCase().indexOf(kw)!==-1 || (p.barcode && p.barcode.indexOf(kw)!==-1)){
+      list.push(p);
+    }
+  }
+  if(!list.length){
+    tbody.innerHTML='<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--text-muted)">ไม่พบสินค้า</td></tr>';
+    return;
+  }
+  tbody.innerHTML = list.map(function(p){
+    var checked = _bulkSelectedIds[p.id] ? 'checked' : '';
+    return '<tr'+(checked?' style="background:#e7f5ff"':'')+'>'
+      +'<td style="text-align:center"><input type="checkbox" class="pm-bulk-cb" data-id="'+p.id+'" '+checked+' onchange="pmToggleSelect('+p.id+')" style="width:18px;height:18px;accent-color:#185FA5;cursor:pointer"></td>'
+      +'<td>'+p.name+'</td><td>'+p.cat+'</td><td style="font-weight:600;color:var(--primary)">฿'+p.price+'</td><td>'+p.stock+'</td>'
+      +'<td class="barcode-cell">'+(p.barcode?p.barcode:'<span style="color:#ccc">—</span>')+'</td>'
+      +'<td style="display:flex;gap:4px">'
+      +'<button class="btn-sm btn-edit" onclick="editProduct('+p.id+')" style="white-space:nowrap">แก้ไข</button>'
+      +'<button class="btn-sm btn-del" onclick="deleteProduct('+p.id+')" style="white-space:nowrap">ลบ</button>'
+      +'</td></tr>';
+  }).join('') + (list.length>=limit?'<tr><td colspan="7" style="text-align:center;padding:8px;color:var(--text-muted);font-size:11px">แสดง '+limit+' รายการแรก — ค้นหาให้เจาะจงขึ้น</td></tr>':'');
+  updateBulkBar();
+}
+
+// checkbox toggle
+function pmToggleSelect(id){
+  if(_bulkSelectedIds[id]) delete _bulkSelectedIds[id];
+  else _bulkSelectedIds[id]=true;
+  updateBulkBar();
+  // อัปเดตสีแถว
+  var cb = document.querySelector('.pm-bulk-cb[data-id="'+id+'"]');
+  if(cb){ cb.closest('tr').style.background = cb.checked?'#e7f5ff':''; }
+}
+
+// แถบเครื่องมือ bulk (เลือกทั้งหมด + ย้ายหมวด)
+function ensureBulkBar(){
+  var pane = document.getElementById('pmPane-products') || document.querySelector('#productModal .modal-body');
+  if(!pane || document.getElementById('pmBulkBar')) return;
+  var bar = document.createElement('div');
+  bar.id = 'pmBulkBar';
+  bar.style.cssText = 'display:none;align-items:center;gap:10px;background:#e7f5ff;border:1px solid #74c0fc;border-radius:10px;padding:10px 14px;margin-bottom:10px;flex-wrap:wrap';
+  bar.innerHTML = ''
+    + '<span style="font-size:13px;font-weight:600;color:#1971c2">เลือก <span id="pmBulkCount">0</span> รายการ</span>'
+    + '<button onclick="pmSelectAll()" style="padding:6px 12px;background:#fff;border:1px solid #74c0fc;color:#1971c2;border-radius:7px;font-size:12px;cursor:pointer;font-family:Sarabun,sans-serif">เลือกทั้งหมด</button>'
+    + '<button onclick="pmClearSelect()" style="padding:6px 12px;background:#fff;border:1px solid #ccc;color:#666;border-radius:7px;font-size:12px;cursor:pointer;font-family:Sarabun,sans-serif">ยกเลิกเลือก</button>'
+    + '<span style="flex:1"></span>'
+    + '<span style="font-size:13px;color:#495057">ย้ายไปหมวด:</span>'
+    + '<select id="pmBulkCat" style="padding:7px 10px;border:1px solid #74c0fc;border-radius:7px;font-size:13px;font-family:Sarabun,sans-serif"></select>'
+    + '<button onclick="pmMoveToCategory()" style="padding:7px 16px;background:#2f9e44;color:#fff;border:none;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;font-family:Sarabun,sans-serif">✓ ย้าย</button>';
+  // แทรกบนสุดของ pane
+  var firstChild = pane.querySelector('#pmImportBtns') || pane.firstChild;
+  pane.insertBefore(bar, firstChild);
+}
+
+function updateBulkBar(){
+  var bar = document.getElementById('pmBulkBar');
+  if(!bar) return;
+  var count = Object.keys(_bulkSelectedIds).length;
+  var countEl = document.getElementById('pmBulkCount');
+  if(countEl) countEl.textContent = count;
+  bar.style.display = count>0 ? 'flex' : 'none';
+  // populate หมวดใน dropdown
+  var sel = document.getElementById('pmBulkCat');
+  if(sel && sel.options.length<=1){
+    var cats = (typeof getCatNames==='function')?getCatNames():CATEGORIES.map(function(c){return c.name;});
+    sel.innerHTML = cats.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join('');
+  }
+}
+
+function pmSelectAll(){
+  var cbs = document.querySelectorAll('.pm-bulk-cb');
+  cbs.forEach(function(cb){ _bulkSelectedIds[parseInt(cb.dataset.id)]=true; cb.checked=true; cb.closest('tr').style.background='#e7f5ff'; });
+  updateBulkBar();
+}
+function pmClearSelect(){
+  _bulkSelectedIds = {};
+  document.querySelectorAll('.pm-bulk-cb').forEach(function(cb){ cb.checked=false; cb.closest('tr').style.background=''; });
+  updateBulkBar();
+}
+
+// ย้ายสินค้าที่เลือกไปหมวดใหม่
+function pmMoveToCategory(){
+  var ids = Object.keys(_bulkSelectedIds).map(Number);
+  if(!ids.length){ showToast('ยังไม่ได้เลือกสินค้า'); return; }
+  var newCat = document.getElementById('pmBulkCat').value;
+  if(!newCat){ showToast('เลือกหมวดปลายทางก่อน'); return; }
+  showConfirm('ย้ายหมวดหมู่','ย้าย '+ids.length+' รายการ ไปหมวด "'+newCat+'"?','📦','ย้าย','').then(function(ok){
+    if(!ok) return;
+    var moved=0;
+    ids.forEach(function(id){
+      var p = PRODUCTS.find(function(x){return x.id===id;});
+      if(p){ p.cat=newCat; moved++; }
+    });
+    saveProducts();
+    _bulkSelectedIds = {};
+    if(typeof renderProdTable==='function') renderProdTable();
+    if(typeof renderCategories==='function') renderCategories();
+    showToast('✅ ย้าย '+moved+' รายการไปหมวด '+newCat+' แล้ว');
+  });
+}
+
+
 </script>
 
 
@@ -15379,6 +15519,79 @@ body.newui-active { overflow: hidden; }
 .nsu-pin-price { font-size:14px; font-weight:600; color:#1971c2; }
 .nsu-pin-footer { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-top:0.5px solid #f1f3f5; }
 .nsu-pin-done { padding:10px 28px; background:linear-gradient(135deg,#f59f00,#ffd43b); color:#5c3c00; border:none; border-radius:10px; font-size:14px; font-weight:600; cursor:pointer; font-family:'Sarabun',sans-serif; }
+</style>
+
+
+<!-- ============ POS v3.0 — PART 57: หน้าต่าง modal ใหญ่ขึ้น ============ -->
+<style id="posV3BigModal">
+/* modal เมนูหลัก (สต๊อก/สินค้า/โปรฯ/รับคืน/รายงาน) ใหญ่เกือบเต็มจอ */
+#stockModal .modal,
+#productModal .modal,
+#promoModal .modal,
+#returnModal .modal,
+#reportModal .modal,
+#importModal .modal,
+#priceLabelModal .modal,
+#prodVisModal .modal,
+#settingsModal .modal,
+#syncModal .modal,
+#cloudSyncModal .modal {
+  width: 94vw !important;
+  max-width: 1100px !important;
+  height: 90vh !important;
+  max-height: 90vh !important;
+}
+
+/* body ของ modal ใหญ่ให้ scroll ได้ + ใช้พื้นที่เต็ม */
+#stockModal .modal-body,
+#productModal .modal-body,
+#promoModal .modal-body,
+#returnModal .modal-body,
+#reportModal .modal-body,
+#importModal .modal-body,
+#priceLabelModal .modal-body,
+#prodVisModal .modal-body,
+#settingsModal .modal-body,
+#syncModal .modal-body,
+#cloudSyncModal .modal-body {
+  flex: 1;
+  overflow-y: auto;
+  max-height: none !important;
+}
+
+/* ตารางในหน้าใหญ่ ตัวอักษรใหญ่ขึ้นเล็กน้อย อ่านง่าย */
+#stockModal table, #productModal table {
+  font-size: 14px;
+}
+#stockModal th, #productModal th,
+#stockModal td, #productModal td {
+  padding: 11px 12px;
+}
+
+/* ช่องกรอกในหน้าใหญ่ ใหญ่ขึ้น กดง่าย (โดยเฉพาะบนแท็บเล็ต) */
+#stockModal .stock-qty-input {
+  width: 70px !important;
+  height: 38px !important;
+  font-size: 16px !important;
+  text-align: center;
+}
+#stockModal .stock-save-btn {
+  padding: 8px 16px !important;
+  font-size: 14px !important;
+}
+
+/* มือถือ: เต็มจอเลย */
+@media (max-width: 768px) {
+  #stockModal .modal, #productModal .modal, #promoModal .modal,
+  #returnModal .modal, #reportModal .modal, #importModal .modal,
+  #priceLabelModal .modal, #prodVisModal .modal, #settingsModal .modal,
+  #syncModal .modal, #cloudSyncModal .modal {
+    width: 100vw !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    border-radius: 0 !important;
+  }
+}
 </style>
 
 </body>
