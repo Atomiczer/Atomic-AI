@@ -14794,6 +14794,83 @@ function pmMoveToCategory(){
 }
 
 
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 59: แก้ update หน้าขาย, ยิงบาร์โค้ดเด้งข้อมูล, หน้าเงินใหญ่
+// ============================================================
+
+// ===== ข้อ 1: แก้ไขสินค้า → อัปเดตหน้าปลีก-ส่งด้วย =====
+(function hookSaveProductRefresh(){
+  ['saveProduct','deleteProduct','toggleProductVisible'].forEach(function(fn){
+    var _orig = window[fn];
+    if(typeof _orig==='function'){
+      window[fn] = function(){
+        var r = _orig.apply(this, arguments);
+        // อัปเดตหน้าปลีก-ส่ง
+        setTimeout(function(){
+          if(typeof nsuRenderProducts==='function'){
+            var s = document.getElementById('nsuSearch');
+            nsuRenderProducts(s ? s.value : '');
+          }
+          if(typeof nsuRefresh==='function') nsuRefresh();
+        }, 100);
+        return r;
+      };
+    }
+  });
+})();
+
+// ===== ข้อ 2: ยิงบาร์โค้ดในหน้าเพิ่มสินค้า → ถ้ามีอยู่แล้วเด้งข้อมูล =====
+(function barcodeAutofillOnAdd(){
+  function run(){
+    var bc = document.getElementById('pfBarcode');
+    if(!bc || bc.dataset.autofillHooked) return;
+    bc.dataset.autofillHooked = '1';
+
+    // เมื่อพิมพ์/ยิงบาร์โค้ด + Enter หรือ blur → เช็คว่ามีสินค้าไหม
+    function checkExisting(){
+      var val = bc.value.trim();
+      if(!val) return;
+      // แปลงบาร์โค้ดไทยมั่ว
+      if(typeof isLikelyThaiBarcode==='function' && isLikelyThaiBarcode(val) && typeof convertThaiBarcodeToDigits==='function'){
+        var conv = convertThaiBarcodeToDigits(val);
+        if(/^[0-9]+$/.test(conv)){ bc.value=conv; val=conv; }
+      }
+      // กำลังแก้ไขสินค้าอยู่แล้ว (มี editId) → ไม่ต้องเช็ค
+      var editId = document.getElementById('pfEditId');
+      if(editId && editId.value) return;
+
+      var found = PRODUCTS.find(function(p){ return p.barcode===val; });
+      if(found){
+        // เด้งข้อมูลขึ้นมาแก้ไข
+        showToast('พบสินค้า: '+found.name+' — โหลดข้อมูลมาแก้ไข');
+        if(typeof editProduct==='function') editProduct(found.id);
+      }
+    }
+
+    bc.addEventListener('keydown', function(e){
+      if(e.key==='Enter'){ e.preventDefault(); checkExisting(); 
+        // ถ้าไม่เจอ → ไปช่องชื่อ
+        setTimeout(function(){ var editId=document.getElementById('pfEditId'); if(!editId.value){ var n=document.getElementById('pfName'); if(n) n.focus(); } }, 100);
+      }
+    });
+    bc.addEventListener('blur', function(){ setTimeout(checkExisting, 100); });
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  // hook ตอนเปิด product manager
+  var _origOpen = window.openProductManager;
+  if(typeof _origOpen==='function'){
+    window.openProductManager = function(){
+      _origOpen.apply(this, arguments);
+      setTimeout(run, 100);
+    };
+  }
+  setTimeout(run, 1000);
+})();
+
+
 </script>
 
 
@@ -15591,6 +15668,69 @@ body.newui-active { overflow: hidden; }
     max-height: 100vh !important;
     border-radius: 0 !important;
   }
+}
+</style>
+
+
+<!-- ============ PART 59: หน้าใส่เงิน (ชำระเงิน) ใหญ่ขึ้น ============ -->
+<style id="posV3BigPayment">
+/* cashModal/qrModal ใหญ่ขึ้น อ่านง่าย */
+#cashModal .modal, #qrModal .modal, #creditModal .modal {
+  width: 520px !important;
+  max-width: 96vw !important;
+}
+
+/* ยอดที่ต้องชำระ ตัวใหญ่มาก */
+#cashModal .cash-due, #cashModal #cashDue,
+#qrModal #qrDue {
+  font-size: 40px !important;
+  font-weight: 800 !important;
+}
+
+/* ช่องกรอกเงินรับ ใหญ่ */
+#cashModal .cash-input-display, #cashModal #cashDisplay {
+  font-size: 36px !important;
+  padding: 16px !important;
+  min-height: 60px !important;
+}
+
+/* ปุ่มตัวเลข (numpad) ใหญ่ขึ้น กดง่าย */
+#cashModal .numpad-btn, #cashModal .num-btn, #cashModal .np-btn {
+  font-size: 24px !important;
+  padding: 18px !important;
+  min-height: 56px !important;
+}
+
+/* เงินทอน ตัวใหญ่ */
+#cashModal .change-amt, #cashModal #changeAmt {
+  font-size: 32px !important;
+  font-weight: 800 !important;
+}
+
+/* ปุ่มเงินด่วน (50/100/500/1000) ใหญ่ */
+#cashModal .quick-cash-btn, #cashModal .cash-quick {
+  font-size: 18px !important;
+  padding: 14px !important;
+}
+
+/* ปุ่มยืนยันชำระ ใหญ่ */
+#cashModal .pay-btn, #qrModal .pay-btn, #creditModal .pay-btn {
+  font-size: 18px !important;
+  padding: 16px !important;
+}
+
+/* welfare dialog ใหญ่ขึ้น */
+.nsu-wf-box { width: 440px !important; padding: 26px !important; }
+.nsu-wf-box input { font-size: 30px !important; padding: 16px !important; }
+.nsu-wf-title { font-size: 19px !important; }
+.nsu-wf-total b { font-size: 22px !important; }
+
+/* มือถือ: เต็มความกว้าง */
+@media (max-width: 600px) {
+  #cashModal .modal, #qrModal .modal, #creditModal .modal {
+    width: 96vw !important;
+  }
+  #cashModal #cashDue, #qrModal #qrDue { font-size: 34px !important; }
 }
 </style>
 
