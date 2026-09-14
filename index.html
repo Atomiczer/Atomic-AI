@@ -1170,13 +1170,9 @@
             </div>
             <div class="form-field"><label>ชื่อสินค้า *</label><input class="fm-input" type="text" id="pfName" placeholder="ชื่อสินค้า"></div>
             <div class="form-field"><label>ราคา (บาท) *</label><input class="fm-input" type="number" id="pfPrice" placeholder="0" min="0"></div>
-            <div class="form-field"><label>อีโมจิ</label>
-  <div style="display:flex;gap:6px;align-items:center">
-    <input class="fm-input" type="text" id="pfEmoji" placeholder="📦" maxlength="4"
-      style="font-size:20px;text-align:center;width:60px;flex-shrink:0"
-      onfocus="this.select()" oninput="pfEmojiPreview(this.value)">
-    <div style="display:flex;flex-wrap:wrap;gap:4px;flex:1;background:#fff;border:1px solid var(--border);border-radius:8px;padding:5px;max-height:72px;overflow-y:auto" id="pfEmojiPicker"></div>
-  </div>
+            <div class="form-field" style="display:none">
+    <input type="hidden" id="pfEmoji" value="">
+    <div id="pfEmojiPicker" style="display:none"></div>
 </div>
             <div class="form-field"><label>หมวดหมู่</label><select class="fm-select" id="pfCat"></select></div>
             <div class="form-field"><label>สต๊อกเริ่มต้น</label><input class="fm-input" type="number" id="pfStock" placeholder="0" min="0"></div>
@@ -1192,12 +1188,9 @@
   </div>
   <button type="button" onclick="qbAddRule()" style="margin-top:6px;padding:4px 12px;background:#e3f2fd;color:#1565c0;border:1.5px solid #bbdefb;border-radius:6px;font-size:11px;cursor:pointer;font-family:'Sarabun',sans-serif">➕ เพิ่มช่วงราคา</button>
 </div>
-  <label>💰 ราคาขายแบบ Tier (ไม่บังคับ)</label>
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:4px">
-    <div>
-      <div style="font-size:10px;color:var(--text-muted);margin-bottom:3px">🏷️ ราคาปลีก</div>
-      <input class="fm-input" type="number" id="pfPriceRetail" placeholder="= ราคาปกติ" min="0" step="0.01">
-    </div>
+  <label>💰 ราคาส่ง/VIP (ไม่บังคับ · ราคาปลีก = ราคาขายอัตโนมัติ)</label>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px">
+    <input type="hidden" id="pfPriceRetail" value="">
     <div>
       <div style="font-size:10px;color:var(--text-muted);margin-bottom:3px">📦 ราคาส่ง</div>
       <input class="fm-input" type="number" id="pfPriceWholesale" placeholder="0.00" min="0" step="0.01">
@@ -3282,15 +3275,15 @@ document.getElementById('pfPriceWholesale').value='';
 document.getElementById('pfPriceVip').value='';;document.getElementById('prodFormTitle').textContent='เพิ่มสินค้าใหม่';}
 function editProduct(id){var p=PRODUCTS.find(function(x){return x.id===id;});if(!p)return;document.getElementById('pfEditId').value=id;document.getElementById('pfName').value=p.name;document.getElementById('pfPrice').value=p.price;document.getElementById('pfEmoji').value=p.emoji;renderCatSelect();document.getElementById('pfCat').value=p.cat;document.getElementById('pfStock').value=p.stock;document.getElementById('pfCost').value=p.cost||'';document.getElementById('pfBarcode').value=p.barcode||'';document.getElementById('pfPriceRetail').value=p.priceRetail||'';document.getElementById('pfPriceWholesale').value=p.priceWholesale||'';document.getElementById('pfPriceVip').value=p.priceVip||'';document.getElementById('prodFormTitle').textContent='แก้ไขสินค้า: '+p.name;document.getElementById('prodFormWrap').scrollIntoView({behavior:'smooth'});}
 function saveProduct() {
-  var name=document.getElementById('pfName').value.trim();var price=parseFloat(document.getElementById('pfPrice').value)||0;var emoji=document.getElementById('pfEmoji').value.trim()||'📦';var cat=document.getElementById('pfCat').value;var stock=parseInt(document.getElementById('pfStock').value)||0;var barcode=document.getElementById('pfBarcode').value.trim();var cost=parseFloat(document.getElementById('pfCost').value)||0;
+  var name=document.getElementById('pfName').value.trim();var price=parseFloat(document.getElementById('pfPrice').value)||0;var emoji='';var cat=document.getElementById('pfCat').value;var stock=parseInt(document.getElementById('pfStock').value)||0;var barcode=document.getElementById('pfBarcode').value.trim();var cost=parseFloat(document.getElementById('pfCost').value)||0;
 var priceRetail=parseFloat(document.getElementById('pfPriceRetail').value)||0;
 var priceWholesale=parseFloat(document.getElementById('pfPriceWholesale').value)||0;
 var priceVip=parseFloat(document.getElementById('pfPriceVip').value)||0;var editId=parseInt(document.getElementById('pfEditId').value)||0;
   if(!name){showToast('กรุณาระบุชื่อสินค้า');return;}if(price<=0){showToast('กรุณาระบุราคา');return;}
   if(barcode){var dup=PRODUCTS.find(function(x){return x.barcode===barcode&&x.id!==editId;});if(dup){showToast('บาร์โค้ดนี้ใช้กับ '+dup.name+' อยู่แล้ว');return;}}
-  if(editId){var p=PRODUCTS.find(function(x){return x.id===editId;});if(p){p.name=name;p.price=price;p.emoji=emoji;p.cat=cat;p.stock=stock;p.barcode=barcode;p.cost=cost;p.priceRetail=priceRetail||price;p.priceWholesale=priceWholesale||price;p.priceVip=priceVip||price;p.visible=p.visible!==false;}showToast('แก้ไข '+name+' แล้ว');}
+  if(editId){var p=PRODUCTS.find(function(x){return x.id===editId;});if(p){p.name=name;p.price=price;p.emoji=emoji;p.cat=cat;p.stock=stock;p.barcode=barcode;p.cost=cost;p.priceRetail=price;p.priceWholesale=priceWholesale||price;p.priceVip=priceVip||price;p.visible=p.visible!==false;}showToast('แก้ไข '+name+' แล้ว');}
   else{
-  PRODUCTS.push({id:nextId++,name:name,price:price,emoji:emoji,cat:cat,stock:stock,barcode:barcode,cost:cost,priceRetail:priceRetail||price,priceWholesale:priceWholesale||price,priceVip:priceVip||price,visible:true});
+  PRODUCTS.push({id:nextId++,name:name,price:price,emoji:emoji,cat:cat,stock:stock,barcode:barcode,cost:cost,priceRetail:price,priceWholesale:priceWholesale||price,priceVip:priceVip||price,visible:true});
   showToast('เพิ่ม '+name+' แล้ว');}
   saveProducts();saveStock();renderProdTable();renderCategories();renderProducts();resetProdForm();
 }
@@ -6135,7 +6128,7 @@ function selectVoidOrder(orderNum){
   document.getElementById('voidNote').value = '';
   var detail = document.getElementById('voidSelectedDetail');
   var itemsHtml = (h.items_detail||[]).map(function(it){
-    var p = PRODUCTS.find(function(x){return x.id===it.id;})||{emoji:'📦',name:'สินค้า #'+it.id};
+    var p = PRODUCTS.find(function(x){return x.id===it.id;})||{emoji:'',name:'สินค้า #'+it.id};
     return '<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid #ffcdd2">'
       +'<span>'+p.emoji+' '+p.name+' x'+it.qty+'</span>'
       +'<span style="font-weight:700;color:#e53935">'+fmt(it.price*it.qty)+'</span>'
@@ -6642,7 +6635,7 @@ function renderBundleItems() {
   var el = document.getElementById('pfBundleItems');
   if(!el) return;
   el.innerHTML = bundleItems.map(function(bi, idx){
-    var prod = PRODUCTS.find(function(x){return x.id===bi.id;}) || {emoji:'📦', name:'?'};
+    var prod = PRODUCTS.find(function(x){return x.id===bi.id;}) || {emoji:'', name:'?'};
     return '<div style="display:grid;grid-template-columns:1fr 80px 28px;gap:6px;align-items:center">'
       + '<select class="fm-select" onchange="bundleItems['+idx+'].id=parseInt(this.value)">'
         + PRODUCTS.map(function(p){
@@ -8064,7 +8057,7 @@ function saveQuickAdd(addMore){
   var cost = parseFloat(document.getElementById('qaCost').value)||0;
   var cat = document.getElementById('qaCat').value;
   var stock = parseInt(document.getElementById('qaStock').value)||0;
-  var emoji = document.getElementById('qaEmoji').value.trim()||'📦';
+  var emoji = '';
 
   if(!name){ showToast('กรุณาระบุชื่อสินค้า'); document.getElementById('qaName').focus(); return; }
   if(price<=0){ showToast('กรุณาระบุราคาขาย'); document.getElementById('qaPrice').focus(); return; }
@@ -8293,7 +8286,7 @@ function confirmImport(){
         updated++;
       } else if(!existing){
         PRODUCTS.push({
-          id: nextId++, name:r.name, price:r.price, emoji:'📦', cat:r.cat,
+          id: nextId++, name:r.name, price:r.price, emoji:'', cat:r.cat,
           stock:r.stock, barcode:r.barcode, cost:r.cost,
           priceRetail:r.price, priceWholesale:r.price, priceVip:r.price, visible:true
         });
@@ -11038,7 +11031,7 @@ window.confirmImport = function(){
         skippedDup++; // ซ้ำและไม่อัปเดต → ข้าม
       } else {
         var newProd = {
-          id: nextId++, name:r.name, price:r.price, emoji:'📦', cat:r.cat,
+          id: nextId++, name:r.name, price:r.price, emoji:'', cat:r.cat,
           stock:r.stock, barcode:r.barcode, cost:r.cost,
           priceRetail:r.price, priceWholesale:r.price, priceVip:r.price, visible:true
         };
@@ -11198,7 +11191,7 @@ window.confirmImport = function(){
         skippedDup++;
       } else {
         var np = {
-          id: nextId++, name:r.name, price:r.price, emoji:'📦', cat:r.cat,
+          id: nextId++, name:r.name, price:r.price, emoji:'', cat:r.cat,
           stock:r.stock, barcode:r.barcode, cost:r.cost,
           priceRetail:r.price, priceWholesale:r.price, priceVip:r.price, visible:true
         };
@@ -14871,6 +14864,55 @@ function pmMoveToCategory(){
 })();
 
 
+
+
+// ============================================================
+// POS v3.0 ADD-ON — PART 60 JS: เอาอีโมจิสินค้าออกจริง (text)
+// ============================================================
+// บางที่ render อีโมจิเป็น text (p.emoji+' '+p.name) — CSS ซ่อนไม่ได้
+// วิธี: ตั้ง emoji ของสินค้าทุกตัวเป็นค่าว่าง (ตอน render จะไม่มีอีโมจิ)
+
+(function removeProductEmojis(){
+  function run(){
+    if(typeof PRODUCTS==='undefined') return;
+    var changed=false;
+    PRODUCTS.forEach(function(p){
+      if(p.emoji && p.emoji!==''){ p.emoji=''; changed=true; }
+    });
+    if(changed && typeof saveProducts==='function') saveProducts();
+    // re-render
+    if(typeof renderProducts==='function') renderProducts();
+    if(typeof nsuRefresh==='function') nsuRefresh();
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+  setTimeout(run, 800);
+  setTimeout(run, 2000);
+})();
+
+// สินค้าที่เพิ่ม/แก้ใหม่ ก็ไม่ใส่อีโมจิ (hook saveProduct)
+(function noEmojiOnSave(){
+  var _orig = window.saveProduct;
+  if(typeof _orig==='function'){
+    window.saveProduct = function(){
+      // ตั้ง pfEmoji เป็นว่างก่อนบันทึก
+      var em = document.getElementById('pfEmoji');
+      if(em) em.value='';
+      return _orig.apply(this, arguments);
+    };
+  }
+  // quick add ด้วย
+  var _origQA = window.saveQuickAdd;
+  if(typeof _origQA==='function'){
+    window.saveQuickAdd = function(){
+      var em = document.getElementById('qaEmoji');
+      if(em) em.value='';
+      return _origQA.apply(this, arguments);
+    };
+  }
+})();
+
+
 </script>
 
 
@@ -15731,6 +15773,170 @@ body.newui-active { overflow: hidden; }
     width: 96vw !important;
   }
   #cashModal #cashDue, #qrModal #qrDue { font-size: 34px !important; }
+}
+</style>
+
+
+<!-- ============ PART 60: ซ่อนอีโมจิสินค้า + หน้าเงินใหญ่ขึ้นอีก ============ -->
+<style id="posV3Part60">
+/* ===== ซ่อนอีโมจิสินค้าทุกที่ ===== */
+.pemoji, .item-emoji, .nsu-pemoji { display: none !important; }
+
+/* ===== หน้าใส่เงินใหญ่ขึ้นอีก (cash/QR/บัตร/แยก) ===== */
+#cashModal .modal, #qrModal .modal, #creditModal .modal, #splitModal .modal {
+  width: 640px !important;
+  max-width: 97vw !important;
+}
+
+/* ยอดที่ต้องชำระ ใหญ่มาก */
+#cashModal #cashDue, #qrModal #qrDue, #splitModal .split-total, #splitModal #splitDue {
+  font-size: 52px !important;
+  font-weight: 800 !important;
+}
+
+/* ช่องกรอกเงินรับ ใหญ่มาก */
+#cashModal #cashDisplay, #cashModal .cash-input-display {
+  font-size: 48px !important;
+  padding: 20px !important;
+  min-height: 76px !important;
+}
+
+/* ปุ่มตัวเลข numpad ใหญ่มาก กดง่าย */
+#cashModal .numpad-btn, #cashModal .num-btn, #cashModal .np-btn,
+#cashModal button[onclick*="cashInput"], #cashModal button[onclick*="appendCash"] {
+  font-size: 30px !important;
+  padding: 24px !important;
+  min-height: 70px !important;
+}
+
+/* เงินทอน ใหญ่มาก */
+#cashModal #changeAmt, #cashModal .change-amt {
+  font-size: 44px !important;
+  font-weight: 800 !important;
+}
+
+/* ป้ายกำกับ ("เงินทอน"/"ไม่เพียงพอ") ใหญ่ */
+#cashModal .change-display .label, #cashModal #changeDisplay .label {
+  font-size: 18px !important;
+}
+
+/* ปุ่มเงินด่วน ใหญ่ */
+#cashModal .quick-cash-btn, #cashModal .cash-quick,
+#cashModal button[onclick*="quickCash"], #cashModal button[onclick*="setCash"] {
+  font-size: 22px !important;
+  padding: 18px !important;
+}
+
+/* ปุ่มยืนยันชำระ ใหญ่มาก */
+#cashModal .pay-btn, #qrModal .pay-btn, #creditModal .pay-btn, #splitModal .pay-btn {
+  font-size: 22px !important;
+  padding: 20px !important;
+}
+
+/* QR รูปใหญ่ขึ้น */
+#qrModal #qrCodeImg, #qrModal .qr-image {
+  width: 280px !important;
+  height: 280px !important;
+}
+
+/* หัวข้อ modal เงิน ใหญ่ */
+#cashModal .modal-header h3, #qrModal .modal-header h3,
+#creditModal .modal-header h3, #splitModal .modal-header h3 {
+  font-size: 20px !important;
+}
+
+/* แยกชำระ: ช่องกรอก + ตัวเลขใหญ่ */
+#splitModal input[type="number"], #splitModal .split-input {
+  font-size: 24px !important;
+  padding: 12px !important;
+}
+#splitModal .split-row, #splitModal .split-method {
+  font-size: 16px !important;
+}
+
+/* welfare dialog ใหญ่ขึ้นอีก */
+.nsu-wf-box { width: 500px !important; padding: 30px !important; }
+.nsu-wf-box input { font-size: 36px !important; padding: 18px !important; }
+.nsu-wf-title { font-size: 22px !important; }
+.nsu-wf-total { font-size: 17px !important; }
+.nsu-wf-total b { font-size: 26px !important; }
+.nsu-wf-save, .nsu-wf-cancel { font-size: 17px !important; padding: 16px !important; }
+
+/* มือถือ */
+@media (max-width: 680px) {
+  #cashModal .modal, #qrModal .modal, #creditModal .modal, #splitModal .modal { width: 97vw !important; }
+  #cashModal #cashDue, #qrModal #qrDue { font-size: 40px !important; }
+  #cashModal #cashDisplay { font-size: 38px !important; }
+}
+</style>
+
+
+<!-- ============ PART 62: ช่องกรอกในฟอร์มสินค้าใหญ่ขึ้น ============ -->
+<style id="posV3BigForm">
+/* ช่องกรอกในหน้าจัดการสินค้า ใหญ่ขึ้น กรอกง่าย */
+#productModal .fm-input,
+#productModal .fm-select {
+  padding: 9px 12px !important;
+  font-size: 14px !important;
+  border-radius: 8px !important;
+  border-width: 1.5px !important;
+}
+
+/* label ใหญ่ขึ้น อ่านชัด */
+#productModal .form-field label,
+#productModal label {
+  font-size: 13px !important;
+  font-weight: 500;
+  margin-bottom: 4px !important;
+  display: block;
+}
+
+/* ระยะห่างระหว่างช่อง เยอะขึ้น (ไม่อึดอัด) */
+#productModal .form-field {
+  margin-bottom: 12px !important;
+}
+#productModal .form-grid {
+  gap: 14px !important;
+}
+
+/* หัวข้อฟอร์ม ("เพิ่มสินค้าใหม่") ใหญ่ */
+#productModal #prodFormTitle,
+#productModal .prod-form-title {
+  font-size: 18px !important;
+  font-weight: 600;
+}
+
+/* ช่องบาร์โค้ด เด่นพิเศษ (ยิงบ่อย) */
+#productModal #pfBarcode {
+  font-size: 15px !important;
+  padding: 11px 12px !important;
+  letter-spacing: 0.5px;
+}
+
+/* ปุ่มบันทึก/ยกเลิก ใหญ่ */
+#productModal .btn-save, #productModal .btn-cancel2,
+#productModal #prodFormWrap button {
+  font-size: 16px !important;
+  padding: 12px 24px !important;
+}
+
+/* ปุ่มสุ่มบาร์โค้ด ใหญ่ตาม */
+#productModal .barcode-gen-btn {
+  font-size: 14px !important;
+  padding: 12px 16px !important;
+}
+
+/* ช่องราคา tier / ราคาตามจำนวน ใหญ่ขึ้น */
+#productModal #pfPriceWholesale, #productModal #pfPriceVip,
+#productModal #pfCost, #productModal #pfPrice, #productModal #pfStock, #productModal #pfName {
+  font-size: 14px !important;
+  padding: 9px 12px !important;
+}
+
+/* มือถือ: ช่องเต็มความกว้าง ตัวใหญ่ */
+@media (max-width: 768px) {
+  #productModal .form-grid { grid-template-columns: 1fr !important; }
+  #productModal .fm-input, #productModal .fm-select { font-size: 17px !important; }
 }
 </style>
 
